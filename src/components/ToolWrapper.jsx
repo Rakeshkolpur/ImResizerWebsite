@@ -11,6 +11,13 @@ const WordToPdf = React.lazy(() => import('./tools/conversion/WordToPdf'));
 const JpgToPdf = React.lazy(() => import('./tools/conversion/JpgToPdf'));
 const PdfToJpg = React.lazy(() => import('./tools/conversion/PdfToJpg'));
 const ExtractText = React.lazy(() => import('./tools/pdf/ExtractText'));
+const PDFEditor = React.lazy(() => import('./tools/pdf/PDFEditor'));
+const PDFCompress = React.lazy(() => import('./tools/pdf/PDFCompress'));
+const PDFDeletePages = React.lazy(() => import('./tools/pdf/PDFDeletePages'));
+const PDFMerge = React.lazy(() => import('./tools/pdf/PDFMerge'));
+const PDFSplit = React.lazy(() => import('./tools/pdf/PDFSplit'));
+const PDFFillAndSign = React.lazy(() => import('./tools/pdf/PDFFillAndSign'));
+const PDFOrganize = React.lazy(() => import('./tools/pdf/PDFOrganize'));
 
 const ToolWrapper = ({ toolId, onBack }) => {
   const tool = findToolById(toolId);
@@ -40,6 +47,8 @@ const ToolWrapper = ({ toolId, onBack }) => {
         return <ImageCrop />;
       case 'convert_image':
         return <ImageConvert />;
+      case 'pdf_editor':
+        return <PDFEditor />;
       case 'pdf_to_word':
         return <PdfToWord />;
       case 'word_to_pdf':
@@ -50,6 +59,18 @@ const ToolWrapper = ({ toolId, onBack }) => {
         return <PdfToJpg />;
       case 'extract_text':
         return <ExtractText />;
+      case 'compress':
+        return <PDFCompress />;
+      case 'delete_pages':
+        return <PDFDeletePages />;
+      case 'merge':
+        return <PDFMerge />;
+      case 'split':
+        return <PDFSplit />;
+      case 'fill_sign':
+        return <PDFFillAndSign />;
+      case 'organize':
+        return <PDFOrganize />;
       default:
         // If the tool component is not yet implemented, show a message
         return (

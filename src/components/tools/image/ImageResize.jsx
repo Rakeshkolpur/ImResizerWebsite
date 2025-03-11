@@ -24,7 +24,8 @@ const ImageResize = () => {
     keepAspectRatio: true,
     targetSize: null,
     format: 'png',
-    quality: 90
+    quality: 90,
+    algorithm: 'bicubic' // Default to bicubic interpolation
   });
 
   // Size presets in KB
@@ -220,6 +221,13 @@ const ImageResize = () => {
     });
   };
 
+  const handleAlgorithmChange = (algorithm) => {
+    setResizeSettings({
+      ...resizeSettings,
+      algorithm
+    });
+  };
+
   const handleResizeImage = async () => {
     if (!selectedImage) return;
     
@@ -232,6 +240,13 @@ const ImageResize = () => {
       
       // Check if we're using target size
       if (resizeSettings.targetSize) {
+        // Provide format recommendation for better file size targeting
+        const isLossyFormat = ['jpg', 'jpeg', 'webp'].includes(resizeSettings.format);
+        if (!isLossyFormat && resizeSettings.mode === 'reduce') {
+          console.log('Using non-lossy format with target size. Consider using JPEG or WebP for better results.');
+          setResizeError('Tip: For better file size control, consider using JPEG or WebP format instead of PNG.');
+        }
+        
         // Use the improved resizeToTargetSize with mode
         resizedBlob = await resizeToTargetSize(selectedImage, {
           width: resizeSettings.width,
@@ -239,7 +254,8 @@ const ImageResize = () => {
           format: resizeSettings.format,
           targetSize: resizeSettings.targetSize,
           quality: resizeSettings.quality,
-          mode: resizeSettings.mode
+          mode: resizeSettings.mode,
+          algorithm: resizeSettings.algorithm
         });
       } else {
         // Just resize by dimensions
@@ -247,49 +263,46 @@ const ImageResize = () => {
           width: resizeSettings.width,
           height: resizeSettings.height,
           format: resizeSettings.format,
-          quality: resizeSettings.quality
+          quality: resizeSettings.quality,
+          algorithm: resizeSettings.algorithm
         });
       }
       
-      // Calculate the file size of the blob
-      const size = calculateFileSize(resizedBlob).toFixed(2);
+      // Get dimensions of the resized image
+      const img = await createImageBitmap(resizedBlob);
+      const actualWidth = img.width;
+      const actualHeight = img.height;
       
-      // Calculate the percent change in file size
-      const originalSize = selectedImage.size / 1024;
-      const sizeChange = ((size - originalSize) / originalSize * 100).toFixed(1);
-      const sizeChangeText = sizeChange > 0 
-        ? `+${sizeChange}%` 
-        : `${sizeChange}%`;
+      // Calculate actual file size
+      const actualSize = resizedBlob.size / 1024; // KB
+      const targetSize = resizeSettings.targetSize;
       
+      // Check if the actual size is significantly different from the target size
+      if (targetSize && Math.abs(actualSize - targetSize) > targetSize * 0.1) {
+        console.log(`Target size: ${targetSize}KB, Actual size: ${actualSize.toFixed(1)}KB`);
+        setResizeError(`Note: The actual file size (${actualSize.toFixed(1)}KB) differs from the target (${targetSize}KB). This is normal due to image content and format limitations.`);
+      }
+      
+      // Generate a unique ID for this resized image
+      const id = Date.now().toString();
+      
+      // Add the resized image to the list
       setResizedImages([{
-        id: 1,
+        id,
+        blob: resizedBlob,
         url: URL.createObjectURL(resizedBlob),
-        size: `${size} KB`,
-        sizeChange: sizeChangeText,
-        width: resizeSettings.width,
-        height: resizeSettings.height,
-        blob: resizedBlob
+        width: actualWidth,
+        height: actualHeight,
+        size: actualSize,
+        format: resizeSettings.format
       }]);
       
-      setSelectedImageId(1);
+      // Select the new image
+      setSelectedImageId(id);
       
-      // Check if we hit the target size accurately
-      if (resizeSettings.targetSize) {
-        const targetSize = resizeSettings.targetSize;
-        const actualSize = parseFloat(size);
-        const accuracy = Math.abs((actualSize - targetSize) / targetSize) * 100;
-        
-        // If accuracy is poor (more than 10% off), show a warning
-        if (accuracy > 10) {
-          setResizeError(
-            `Note: The resulting file size (${size} KB) is ${accuracy.toFixed(0)}% off from the target size (${targetSize} KB). ` +
-            `This can happen due to image content and format limitations.`
-          );
-        }
-      }
     } catch (error) {
       console.error('Error resizing image:', error);
-      setResizeError('An error occurred while resizing the image. Please try different settings.');
+      setResizeError(`Error: ${error.message}`);
     } finally {
       setIsProcessing(false);
     }
@@ -310,6 +323,23 @@ const ImageResize = () => {
     link.click();
     document.body.removeChild(link);
     URL.revokeObjectURL(url);
+  };
+
+  // Add a function to reset the state and allow selecting another image
+  const handleChooseAnotherImage = () => {
+    // Clear the selected image
+    setSelectedImage(null);
+    // Clear resized images
+    setResizedImages([]);
+    // Clear any errors
+    setResizeError(null);
+    // Reset selected image ID
+    setSelectedImageId(null);
+    
+    // Optionally trigger the file input
+    setTimeout(() => {
+      fileInputRef.current?.click();
+    }, 100);
   };
 
   return (
@@ -372,7 +402,17 @@ const ImageResize = () => {
             <div className="bg-white dark:bg-gray-800 rounded-xl shadow-md p-6 hover-card">
               <h2 className="text-xl font-semibold mb-4 text-gray-800 dark:text-white">Original Image</h2>
               
-              <div className="relative w-full max-h-64 mb-4 rounded-lg overflow-hidden bg-gray-50 dark:bg-gray-700 flex items-center justify-center image-container">
+              <div className="flex justify-between items-center mb-4">
+                <h3 className="text-lg font-semibold text-gray-800 dark:text-white">Original Image</h3>
+                <button
+                  onClick={handleChooseAnotherImage}
+                  className="px-4 py-2 bg-gray-600 hover:bg-gray-700 text-white rounded-lg transition-colors flex items-center"
+                >
+                  Choose Another Image
+                </button>
+              </div>
+              
+              <div className="relative w-full max-h-64 rounded-lg overflow-hidden bg-gray-100 dark:bg-gray-700 flex items-center justify-center">
                 <img
                   src={URL.createObjectURL(selectedImage)}
                   alt="Original"
@@ -380,22 +420,13 @@ const ImageResize = () => {
                 />
               </div>
               
-              <div className="text-center">
+              <div className="mt-3 text-center">
                 <p className="text-sm text-gray-500 dark:text-gray-400">
-                  {selectedImage.name}
-                </p>
-                <p className="text-sm text-gray-500 dark:text-gray-400">
-                  Size: {(selectedImage.size / 1024).toFixed(2)} KB
+                  Size: {(selectedImage.size / 1024).toFixed(1)} KB
                 </p>
                 <p className="text-sm text-gray-500 dark:text-gray-400">
                   Dimensions: {originalDimensions.width} × {originalDimensions.height} px
                 </p>
-                <button 
-                  onClick={handleButtonClick}
-                  className="mt-4 px-4 py-2 bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-200 rounded-lg hover:bg-gray-300 dark:hover:bg-gray-600 transition-colors cursor-pointer"
-                >
-                  Choose Another Image
-                </button>
               </div>
             </div>
             
@@ -426,6 +457,35 @@ const ImageResize = () => {
                     Increase Size
                   </button>
                 </div>
+              </div>
+              
+              {/* Algorithm Selection */}
+              <div className="mb-6">
+                <div className="flex space-x-4">
+                  <button
+                    className={`px-4 py-2 rounded-md ${
+                      resizeSettings.algorithm === 'bilinear'
+                        ? 'bg-blue-500 text-white'
+                        : 'bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-white'
+                    }`}
+                    onClick={() => handleAlgorithmChange('bilinear')}
+                  >
+                    Bilinear (Faster)
+                  </button>
+                  <button
+                    className={`px-4 py-2 rounded-md ${
+                      resizeSettings.algorithm === 'bicubic'
+                        ? 'bg-blue-500 text-white'
+                        : 'bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-white'
+                    }`}
+                    onClick={() => handleAlgorithmChange('bicubic')}
+                  >
+                    Bicubic (Higher Quality)
+                  </button>
+                </div>
+                <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                  Bicubic interpolation provides better quality, especially for photos and detailed images.
+                </p>
               </div>
               
               {/* Dimensions */}
@@ -483,57 +543,85 @@ const ImageResize = () => {
                 </div>
               </div>
               
-              {/* Target Size in KB */}
-              <div className="mb-6">
-                <label className="block text-gray-700 dark:text-gray-300 text-sm font-medium mb-2" htmlFor="targetSize">
-                  Target File Size (KB)
+              {/* Format selection */}
+              <div className="mb-4">
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                  Output Format
                 </label>
+                <div className="flex flex-wrap gap-2">
+                  <select
+                    value={resizeSettings.format}
+                    onChange={handleFormatChange}
+                    className="px-3 py-2 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  >
+                    <option value="jpeg">JPEG (best for photos, smaller size)</option>
+                    <option value="png">PNG (best for graphics, larger size)</option>
+                    <option value="webp">WebP (best overall compression)</option>
+                  </select>
+                </div>
+                {resizeSettings.targetSize && resizeSettings.format === 'png' && (
+                  <p className="text-xs text-amber-600 mt-1">
+                    PNG is lossless and may not achieve exact target file sizes. Consider JPEG or WebP for better size control.
+                  </p>
+                )}
+              </div>
+              
+              {/* Target size selection */}
+              <div className="mb-4">
+                <div className="flex items-center justify-between mb-2">
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                    Target File Size {resizeSettings.targetSize ? `(${resizeSettings.targetSize} KB)` : ''}
+                  </label>
+                  {resizeSettings.targetSize && (
+                    <button
+                      onClick={() => setResizeSettings({...resizeSettings, targetSize: null})}
+                      className="text-xs text-blue-500 hover:text-blue-700"
+                    >
+                      Clear
+                    </button>
+                  )}
+                </div>
                 <input
-                  type="number"
-                  id="targetSize"
-                  value={resizeSettings.targetSize || ''}
+                  type="range"
+                  min="10"
+                  max={resizeSettings.mode === 'reduce' ? '200' : '1000'}
+                  step="10"
+                  value={resizeSettings.targetSize || '100'}
                   onChange={handleTargetSizeChange}
-                  min="1"
-                  placeholder="Enter target size in KB"
-                  className="w-full p-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent mb-2"
+                  className="w-full h-2 bg-gray-200 dark:bg-gray-700 rounded-lg appearance-none cursor-pointer"
                 />
-                
-                <div className="flex flex-wrap gap-2 mt-2">
+                <div className="flex justify-between text-xs text-gray-500 dark:text-gray-400 mt-1">
+                  <span>Small</span>
+                  <span>Medium</span>
+                  <span>Large</span>
+                </div>
+                <div className="flex flex-wrap gap-1 mt-2">
                   {(resizeSettings.mode === 'reduce' ? reducePresets : increasePresets).map(size => (
                     <button
                       key={size}
                       onClick={() => handleSizePresetClick(size)}
-                      className={`px-3 py-1 text-sm rounded-md cursor-pointer ${
+                      className={`px-2 py-1 text-xs rounded-md ${
                         resizeSettings.targetSize === size
-                          ? 'bg-purple-500 text-white'
-                          : 'bg-gray-200 text-gray-700 dark:bg-gray-700 dark:text-gray-200 hover:bg-gray-300 dark:hover:bg-gray-600'
+                          ? 'bg-blue-500 text-white'
+                          : 'bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-white hover:bg-gray-300 dark:hover:bg-gray-600'
                       }`}
                     >
                       {getKbSizeLabel(size)}
                     </button>
                   ))}
                 </div>
+                {resizeSettings.targetSize && (
+                  <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                    <span className="font-medium">Note:</span> Actual file size may vary based on image content and format.
+                    {resizeSettings.format === 'jpeg' || resizeSettings.format === 'webp' 
+                      ? ' Lossy formats like JPEG and WebP provide better file size control.'
+                      : ' PNG is lossless and may result in larger files.'}
+                  </p>
+                )}
               </div>
               
               {/* Format & Quality */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-6">
-                <div>
-                  <label className="block text-gray-700 dark:text-gray-300 text-sm font-medium mb-1" htmlFor="format">
-                    Format
-                  </label>
-                  <select
-                    id="format"
-                    value={resizeSettings.format}
-                    onChange={handleFormatChange}
-                    className="w-full p-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent cursor-pointer"
-                  >
-                    <option value="png">PNG</option>
-                    <option value="jpeg">JPG</option>
-                    <option value="webp">WebP</option>
-                    <option value="gif">GIF</option>
-                  </select>
-                </div>
-                
                 <div>
                   <label className="block text-gray-700 dark:text-gray-300 text-sm font-medium mb-1" htmlFor="quality">
                     Quality: {resizeSettings.quality}%
@@ -589,46 +677,118 @@ const ImageResize = () => {
                   </div>
                 </div>
               ) : resizedImages.length > 0 ? (
-                <div>
-                  {resizedImages.map((image) => (
-                    <div 
-                      key={image.id}
-                      className={`
-                        border-2 p-4 rounded-xl cursor-pointer transition-all duration-200
-                        ${selectedImageId === image.id 
-                          ? 'border-purple-500 bg-purple-50 dark:bg-purple-900 dark:bg-opacity-10' 
-                          : 'border-gray-200 dark:border-gray-700 hover:border-purple-300 dark:hover:border-purple-700'}
-                      `}
-                      onClick={() => setSelectedImageId(image.id)}
-                    >
-                      <div className="relative w-full max-h-64 mb-4 rounded-lg overflow-hidden bg-gray-50 dark:bg-gray-700 flex items-center justify-center image-container">
-                        <img
-                          src={image.url}
-                          alt={`Resized ${image.id}`}
-                          className="max-w-full max-h-64 object-contain"
-                        />
-                      </div>
-                      <div className="text-center">
-                        <p className="text-sm font-medium text-gray-700 dark:text-gray-300">
-                          {image.width} × {image.height} px
-                        </p>
-                        <p className="text-sm text-gray-500 dark:text-gray-400">
-                          Size: {image.size} <span className={image.sizeChange.startsWith('+') ? 'text-green-500' : 'text-red-500'}>({image.sizeChange})</span>
-                        </p>
-                        <p className="text-sm text-gray-500 dark:text-gray-400">
-                          Format: {resizeSettings.format.toUpperCase()}
-                        </p>
-                      </div>
-                    </div>
-                  ))}
+                <div className="bg-white dark:bg-gray-800 rounded-lg shadow-md p-6 mb-6">
+                  <h3 className="text-lg font-semibold mb-4 text-gray-800 dark:text-white">Resized Image</h3>
                   
                   {resizeError && (
-                    <div className="mt-4 p-3 bg-yellow-50 dark:bg-yellow-900 dark:bg-opacity-20 border border-yellow-200 dark:border-yellow-800 rounded-lg">
-                      <p className="text-sm text-yellow-700 dark:text-yellow-300">
-                        {resizeError}
-                      </p>
+                    <div className="mb-4 p-3 bg-amber-50 dark:bg-amber-900/20 border-l-4 border-amber-500 text-amber-700 dark:text-amber-400">
+                      <p>{resizeError}</p>
                     </div>
                   )}
+                  
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    {/* Image preview */}
+                    <div className="flex flex-col items-center">
+                      <div className="relative w-full h-64 bg-gray-100 dark:bg-gray-700 rounded-lg overflow-hidden mb-4">
+                        <img 
+                          src={resizedImages[0].url} 
+                          alt="Resized" 
+                          className="w-full h-full object-contain"
+                        />
+                      </div>
+                      <button
+                        onClick={downloadImage}
+                        className="px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg transition-colors flex items-center"
+                      >
+                        <svg className="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                        </svg>
+                        Download Image
+                      </button>
+                    </div>
+                    
+                    {/* Image details */}
+                    <div className="flex flex-col">
+                      <h4 className="text-md font-medium mb-3 text-gray-700 dark:text-gray-300">Image Details</h4>
+                      
+                      <div className="space-y-3">
+                        <div className="flex justify-between py-2 border-b border-gray-200 dark:border-gray-700">
+                          <span className="text-gray-600 dark:text-gray-400">Dimensions</span>
+                          <span className="font-medium text-gray-800 dark:text-gray-200">
+                            {resizedImages[0].width} × {resizedImages[0].height} px
+                          </span>
+                        </div>
+                        
+                        <div className="flex justify-between py-2 border-b border-gray-200 dark:border-gray-700">
+                          <span className="text-gray-600 dark:text-gray-400">File Size</span>
+                          <span className="font-medium text-gray-800 dark:text-gray-200">
+                            {resizedImages[0].size.toFixed(1)} KB
+                          </span>
+                        </div>
+                        
+                        <div className="flex justify-between py-2 border-b border-gray-200 dark:border-gray-700">
+                          <span className="text-gray-600 dark:text-gray-400">Format</span>
+                          <span className="font-medium text-gray-800 dark:text-gray-200 uppercase">
+                            {resizedImages[0].format}
+                          </span>
+                        </div>
+                        
+                        <div className="flex justify-between py-2 border-b border-gray-200 dark:border-gray-700">
+                          <span className="text-gray-600 dark:text-gray-400">Algorithm</span>
+                          <span className="font-medium text-gray-800 dark:text-gray-200">
+                            {resizeSettings.algorithm === 'bicubic' ? 'Bicubic (High Quality)' : 'Bilinear (Standard)'}
+                          </span>
+                        </div>
+                        
+                        {resizeSettings.targetSize && (
+                          <div className="flex justify-between py-2 border-b border-gray-200 dark:border-gray-700">
+                            <span className="text-gray-600 dark:text-gray-400">Target Size</span>
+                            <div className="flex items-center">
+                              <span className="font-medium text-gray-800 dark:text-gray-200">
+                                {resizeSettings.targetSize} KB
+                              </span>
+                              {Math.abs(resizedImages[0].size - resizeSettings.targetSize) > resizeSettings.targetSize * 0.1 ? (
+                                <span className="ml-2 px-2 py-0.5 text-xs bg-amber-100 text-amber-800 dark:bg-amber-900 dark:text-amber-200 rounded-full">
+                                  {resizedImages[0].size > resizeSettings.targetSize ? 'Larger' : 'Smaller'}
+                                </span>
+                              ) : (
+                                <span className="ml-2 px-2 py-0.5 text-xs bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200 rounded-full">
+                                  Achieved
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        )}
+                        
+                        <div className="flex justify-between py-2">
+                          <span className="text-gray-600 dark:text-gray-400">Original Size</span>
+                          <span className="font-medium text-gray-800 dark:text-gray-200">
+                            {(selectedImage.size / 1024).toFixed(1)} KB
+                          </span>
+                        </div>
+                        
+                        <div className="mt-4 p-3 bg-gray-50 dark:bg-gray-700 rounded-lg">
+                          <h5 className="text-sm font-medium mb-2 text-gray-700 dark:text-gray-300">Size Comparison</h5>
+                          <div className="relative h-6 bg-gray-200 dark:bg-gray-600 rounded-full overflow-hidden">
+                            <div 
+                              className="h-full bg-blue-500 rounded-full"
+                              style={{ 
+                                width: `${Math.min(100, (resizedImages[0].size / (selectedImage.size / 1024)) * 100)}%` 
+                              }}
+                            ></div>
+                          </div>
+                          <div className="flex justify-between text-xs mt-1">
+                            <span className="text-gray-500 dark:text-gray-400">
+                              {Math.round((1 - (resizedImages[0].size / (selectedImage.size / 1024))) * 100)}% smaller
+                            </span>
+                            <span className="text-gray-500 dark:text-gray-400">
+                              {Math.round((resizedImages[0].size / (selectedImage.size / 1024)) * 100)}% of original
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
                 </div>
               ) : (
                 <div className="flex flex-col items-center justify-center p-10 h-64 border-2 border-gray-200 dark:border-gray-700 border-dashed rounded-xl">

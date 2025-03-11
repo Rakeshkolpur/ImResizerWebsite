@@ -84,7 +84,8 @@ export const toolGroups = [
         title: 'PDF Editor',
         description: 'Edit PDF files for free. Fill & sign PDF. Add text, links, images and shapes. Edit existing PDF text. Annotate PDF.',
         icon: <PdfIcon />,
-        category: 'pdf'
+        category: 'pdf',
+        component: 'PDFEditor'
       },
       {
         id: 'compress',
@@ -140,6 +141,13 @@ export const toolGroups = [
         title: 'Extract Pages',
         description: 'Get a new document containing only the desired pages',
         icon: <ExtractIcon />,
+        category: 'pdf'
+      },
+      {
+        id: 'organize',
+        title: 'Organize',
+        description: 'Arrange and reorder PDF pages with drag and drop',
+        icon: <OrganizeIcon />,
         category: 'pdf'
       },
     ]

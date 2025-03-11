@@ -31,6 +31,9 @@ const ImageCrop = () => {
   const [resizeDirection, setResizeDirection] = useState(null);
   const [initialCrop, setInitialCrop] = useState(null);
   
+  // Add a new state for showing crop dimensions overlay
+  const [showDimensionsOverlay, setShowDimensionsOverlay] = useState(true);
+  
   const imgRef = useRef(null);
   const fileInputRef = useRef(null);
   const previewCanvasRef = useRef(null);
@@ -522,8 +525,11 @@ const ImageCrop = () => {
     }
   };
 
+  // Enhance the handleMouseMove function to update dimensions and position in real-time
   const handleMouseMove = (e) => {
-    if (!isDraggingCrop || !image || !imgRef.current || !initialCrop) return;
+    if (!isDraggingCrop || !imgRef.current || !initialCrop) return;
+    
+    e.preventDefault();
     
     try {
       // Get mouse position relative to the image
@@ -531,156 +537,102 @@ const ImageCrop = () => {
       const mouseX = e.clientX - rect.left;
       const mouseY = e.clientY - rect.top;
       
-      // Calculate movement delta
+      // Calculate the delta from the drag start position
       const deltaX = mouseX - dragStartCoords.x;
       const deltaY = mouseY - dragStartCoords.y;
       
-      const img = imgRef.current;
-      const maxWidth = img.width;
-      const maxHeight = img.height;
+      // Get the initial crop values
+      const { dimensions: initDim, position: initPos } = initialCrop;
       
-      // Create new dimensions and position
-      let newWidth = initialCrop.dimensions.width;
-      let newHeight = initialCrop.dimensions.height;
-      let newX = initialCrop.position.x;
-      let newY = initialCrop.position.y;
+      // Create new crop values based on resize direction
+      let newWidth = initDim.width;
+      let newHeight = initDim.height;
+      let newX = initPos.x;
+      let newY = initPos.y;
       
       // Handle different resize directions
-      switch (resizeDirection) {
-        case 'move':
-          // Move the entire crop box
-          newX = Math.max(0, Math.min(maxWidth - newWidth, initialCrop.position.x + deltaX));
-          newY = Math.max(0, Math.min(maxHeight - newHeight, initialCrop.position.y + deltaY));
-          break;
-        case 'nw':
-          // Resize from top-left corner
-          newX = Math.max(0, Math.min(initialCrop.position.x + initialCrop.dimensions.width - 10, initialCrop.position.x + deltaX));
-          newY = Math.max(0, Math.min(initialCrop.position.y + initialCrop.dimensions.height - 10, initialCrop.position.y + deltaY));
-          newWidth = initialCrop.position.x + initialCrop.dimensions.width - newX;
-          newHeight = initialCrop.position.y + initialCrop.dimensions.height - newY;
-          
-          // Maintain aspect ratio if needed
-          if (aspectRatio) {
-            const ratio = aspectRatio;
-            if (newWidth / newHeight > ratio) {
-              newWidth = Math.round(newHeight * ratio);
-              newX = initialCrop.position.x + initialCrop.dimensions.width - newWidth;
-            } else {
-              newHeight = Math.round(newWidth / ratio);
-              newY = initialCrop.position.y + initialCrop.dimensions.height - newHeight;
+      if (resizeDirection) {
+        // Resizing from edges
+        if (resizeDirection.includes('e')) {
+          // East (right) edge
+          newWidth = Math.max(10, initDim.width + deltaX);
+        }
+        if (resizeDirection.includes('w')) {
+          // West (left) edge
+          newWidth = Math.max(10, initDim.width - deltaX);
+          newX = initPos.x + deltaX;
+        }
+        if (resizeDirection.includes('s')) {
+          // South (bottom) edge
+          newHeight = Math.max(10, initDim.height + deltaY);
+        }
+        if (resizeDirection.includes('n')) {
+          // North (top) edge
+          newHeight = Math.max(10, initDim.height - deltaY);
+          newY = initPos.y + deltaY;
+        }
+        
+        // Maintain aspect ratio if needed
+        if (aspectRatio && resizeDirection !== 'move') {
+          // If resizing from a corner, prioritize the width
+          if (resizeDirection.includes('e') || resizeDirection.includes('w')) {
+            newHeight = newWidth / aspectRatio;
+            // Adjust Y position if resizing from top
+            if (resizeDirection.includes('n')) {
+              newY = initPos.y + initDim.height - newHeight;
+            }
+          } else {
+            newWidth = newHeight * aspectRatio;
+            // Adjust X position if resizing from left
+            if (resizeDirection.includes('w')) {
+              newX = initPos.x + initDim.width - newWidth;
             }
           }
-          break;
-        case 'ne':
-          // Resize from top-right corner
-          newWidth = Math.max(10, Math.min(maxWidth - newX, initialCrop.dimensions.width + deltaX));
-          newY = Math.max(0, Math.min(initialCrop.position.y + initialCrop.dimensions.height - 10, initialCrop.position.y + deltaY));
-          newHeight = initialCrop.position.y + initialCrop.dimensions.height - newY;
-          
-          // Maintain aspect ratio if needed
-          if (aspectRatio) {
-            const ratio = aspectRatio;
-            if (newWidth / newHeight > ratio) {
-              newWidth = Math.round(newHeight * ratio);
-            } else {
-              newHeight = Math.round(newWidth / ratio);
-              newY = initialCrop.position.y + initialCrop.dimensions.height - newHeight;
-            }
-          }
-          break;
-        case 'sw':
-          // Resize from bottom-left corner
-          newX = Math.max(0, Math.min(initialCrop.position.x + initialCrop.dimensions.width - 10, initialCrop.position.x + deltaX));
-          newWidth = initialCrop.position.x + initialCrop.dimensions.width - newX;
-          newHeight = Math.max(10, Math.min(maxHeight - newY, initialCrop.dimensions.height + deltaY));
-          
-          // Maintain aspect ratio if needed
-          if (aspectRatio) {
-            const ratio = aspectRatio;
-            if (newWidth / newHeight > ratio) {
-              newWidth = Math.round(newHeight * ratio);
-              newX = initialCrop.position.x + initialCrop.dimensions.width - newWidth;
-            } else {
-              newHeight = Math.round(newWidth / ratio);
-            }
-          }
-          break;
-        case 'se':
-          // Resize from bottom-right corner
-          newWidth = Math.max(10, Math.min(maxWidth - newX, initialCrop.dimensions.width + deltaX));
-          newHeight = Math.max(10, Math.min(maxHeight - newY, initialCrop.dimensions.height + deltaY));
-          
-          // Maintain aspect ratio if needed
-          if (aspectRatio) {
-            const ratio = aspectRatio;
-            if (newWidth / newHeight > ratio) {
-              newWidth = Math.round(newHeight * ratio);
-            } else {
-              newHeight = Math.round(newWidth / ratio);
-            }
-          }
-          break;
-        case 'n':
-          // Resize from top edge
-          newY = Math.max(0, Math.min(initialCrop.position.y + initialCrop.dimensions.height - 10, initialCrop.position.y + deltaY));
-          newHeight = initialCrop.position.y + initialCrop.dimensions.height - newY;
-          
-          // Maintain aspect ratio if needed
-          if (aspectRatio) {
-            newWidth = Math.round(newHeight * aspectRatio);
-            // Center horizontally
-            newX = initialCrop.position.x + (initialCrop.dimensions.width - newWidth) / 2;
-            // Ensure within bounds
-            newX = Math.max(0, Math.min(maxWidth - newWidth, newX));
-          }
-          break;
-        case 's':
-          // Resize from bottom edge
-          newHeight = Math.max(10, Math.min(maxHeight - newY, initialCrop.dimensions.height + deltaY));
-          
-          // Maintain aspect ratio if needed
-          if (aspectRatio) {
-            newWidth = Math.round(newHeight * aspectRatio);
-            // Center horizontally
-            newX = initialCrop.position.x + (initialCrop.dimensions.width - newWidth) / 2;
-            // Ensure within bounds
-            newX = Math.max(0, Math.min(maxWidth - newWidth, newX));
-          }
-          break;
-        case 'w':
-          // Resize from left edge
-          newX = Math.max(0, Math.min(initialCrop.position.x + initialCrop.dimensions.width - 10, initialCrop.position.x + deltaX));
-          newWidth = initialCrop.position.x + initialCrop.dimensions.width - newX;
-          
-          // Maintain aspect ratio if needed
-          if (aspectRatio) {
-            newHeight = Math.round(newWidth / aspectRatio);
-            // Center vertically
-            newY = initialCrop.position.y + (initialCrop.dimensions.height - newHeight) / 2;
-            // Ensure within bounds
-            newY = Math.max(0, Math.min(maxHeight - newHeight, newY));
-          }
-          break;
-        case 'e':
-          // Resize from right edge
-          newWidth = Math.max(10, Math.min(maxWidth - newX, initialCrop.dimensions.width + deltaX));
-          
-          // Maintain aspect ratio if needed
-          if (aspectRatio) {
-            newHeight = Math.round(newWidth / aspectRatio);
-            // Center vertically
-            newY = initialCrop.position.y + (initialCrop.dimensions.height - newHeight) / 2;
-            // Ensure within bounds
-            newY = Math.max(0, Math.min(maxHeight - newHeight, newY));
-          }
-          break;
-        default:
-          break;
+        }
+      } else {
+        // Moving the entire crop area
+        newX = initPos.x + deltaX;
+        newY = initPos.y + deltaY;
       }
       
-      // Update the crop area
+      // Ensure crop stays within image bounds
+      const imgWidth = imgRef.current.width;
+      const imgHeight = imgRef.current.height;
+      
+      // Constrain X position
+      if (newX < 0) newX = 0;
+      if (newX + newWidth > imgWidth) {
+        if (resizeDirection && resizeDirection.includes('e')) {
+          newWidth = imgWidth - newX;
+          if (aspectRatio) newHeight = newWidth / aspectRatio;
+        } else {
+          newX = imgWidth - newWidth;
+        }
+      }
+      
+      // Constrain Y position
+      if (newY < 0) newY = 0;
+      if (newY + newHeight > imgHeight) {
+        if (resizeDirection && resizeDirection.includes('s')) {
+          newHeight = imgHeight - newY;
+          if (aspectRatio) newWidth = newHeight * aspectRatio;
+        } else {
+          newY = imgHeight - newHeight;
+        }
+      }
+      
+      // Round values for cleaner UI
+      newWidth = Math.round(newWidth);
+      newHeight = Math.round(newHeight);
+      newX = Math.round(newX);
+      newY = Math.round(newY);
+      
+      // Update state with new values
+      setIsAdjustingManually(true);
       setDimensions({ width: newWidth, height: newHeight });
       setPosition({ x: newX, y: newY });
+      
+      // Update crop state for ReactCrop
       setCrop({
         unit: 'px',
         width: newWidth,
@@ -688,6 +640,8 @@ const ImageCrop = () => {
         x: newX,
         y: newY
       });
+      
+      // Set completed crop for preview generation
       setCompletedCrop({
         unit: 'px',
         width: newWidth,
@@ -695,9 +649,14 @@ const ImageCrop = () => {
         x: newX,
         y: newY
       });
+      
+      // Reset manual adjustment flag after a short delay
+      clearTimeout(window.adjustTimeout);
+      window.adjustTimeout = setTimeout(() => setIsAdjustingManually(false), 50);
+      
     } catch (err) {
-      setDebugInfo(prev => `${prev}\nError in mouseMove: ${err.message}`);
-      setIsDraggingCrop(false);
+      console.error('Error in handleMouseMove:', err);
+      setDebugInfo(`Error in handleMouseMove: ${err.message}`);
     }
   };
 
@@ -856,6 +815,22 @@ const ImageCrop = () => {
               </div>
             </div>
             
+            {/* Show dimensions overlay toggle */}
+            <div className="mb-4">
+              <div className="flex items-center">
+                <input
+                  type="checkbox"
+                  id="showDimensions"
+                  checked={showDimensionsOverlay}
+                  onChange={() => setShowDimensionsOverlay(!showDimensionsOverlay)}
+                  className="h-4 w-4 text-blue-600 rounded border-gray-300 focus:ring-blue-500"
+                />
+                <label htmlFor="showDimensions" className="ml-2 text-sm text-gray-700 dark:text-gray-300">
+                  Show dimensions overlay
+                </label>
+              </div>
+            </div>
+            
             {/* Action buttons */}
             <div className="flex flex-col space-y-3">
               <button
@@ -897,38 +872,90 @@ const ImageCrop = () => {
                 style={{ minHeight: '400px' }}
                 ref={imageContainerRef}
               >
-                {/* Basic image display without ReactCrop */}
+                {/* Replace the existing ReactCrop component with this wrapper */}
                 <div className="relative">
-                  <img 
-                    src={image} 
-                    alt="Original"
-                    className="max-w-full" 
-                    style={{ maxHeight: '500px', display: 'block' }}
-                    ref={imgRef}
-                  />
-                  
-                  {/* Crop overlay with resize handles */}
-                  <div 
-                    className="absolute border-2 border-white" 
-                    style={{
-                      top: `${position.y}px`,
-                      left: `${position.x}px`,
-                      width: `${dimensions.width}px`,
-                      height: `${dimensions.height}px`,
-                      cursor: isDraggingCrop && resizeDirection === 'move' ? 'move' : 'default'
-                    }}
+                  <ReactCrop
+                    src={image}
+                    crop={crop}
+                    onChange={(newCrop) => setCrop(newCrop)}
+                    onComplete={(c) => setCompletedCrop(c)}
+                    ruleOfThirds
+                    circularCrop={false}
+                    keepSelection
+                    aspect={aspectRatio}
                   >
-                    {/* Corner resize handles */}
-                    <div className="absolute w-3 h-3 bg-white border border-gray-800 top-0 left-0 -mt-1.5 -ml-1.5 cursor-nw-resize"></div>
-                    <div className="absolute w-3 h-3 bg-white border border-gray-800 top-0 right-0 -mt-1.5 -mr-1.5 cursor-ne-resize"></div>
-                    <div className="absolute w-3 h-3 bg-white border border-gray-800 bottom-0 left-0 -mb-1.5 -ml-1.5 cursor-sw-resize"></div>
-                    <div className="absolute w-3 h-3 bg-white border border-gray-800 bottom-0 right-0 -mb-1.5 -mr-1.5 cursor-se-resize"></div>
+                    <img
+                      ref={imgRef}
+                      alt="Crop me"
+                      src={image}
+                      style={{ maxHeight: '70vh' }}
+                    />
+                  </ReactCrop>
+                  
+                  {/* Dimensions overlay */}
+                  {showDimensionsOverlay && crop.width > 0 && (
+                    <div 
+                      className="absolute bg-black bg-opacity-70 text-white text-xs px-2 py-1 rounded pointer-events-none"
+                      style={{ 
+                        left: crop.x + 5,
+                        top: crop.y + 5,
+                        zIndex: 100
+                      }}
+                    >
+                      {Math.round(crop.width)} × {Math.round(crop.height)} px
+                      <br />
+                      X: {Math.round(crop.x)}, Y: {Math.round(crop.y)}
+                    </div>
+                  )}
+                  
+                  {/* Crop controls toolbar */}
+                  <div className="absolute bottom-0 left-0 right-0 bg-black bg-opacity-70 text-white p-2 flex justify-center space-x-4">
+                    <button 
+                      onClick={resetCrop}
+                      className="flex items-center justify-center w-10 h-10 rounded-full bg-gray-800 hover:bg-gray-700 transition-colors"
+                      title="Reset crop"
+                    >
+                      <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                        <path fillRule="evenodd" d="M4 2a1 1 0 011 1v2.101a7.002 7.002 0 0111.601 2.566 1 1 0 11-1.885.666A5.002 5.002 0 005.999 7H9a1 1 0 010 2H4a1 1 0 01-1-1V3a1 1 0 011-1zm.008 9.057a1 1 0 011.276.61A5.002 5.002 0 0014.001 13H11a1 1 0 110-2h5a1 1 0 011 1v5a1 1 0 11-2 0v-2.101a7.002 7.002 0 01-11.601-2.566 1 1 0 01.61-1.276z" clipRule="evenodd" />
+                      </svg>
+                    </button>
                     
-                    {/* Edge resize handles */}
-                    <div className="absolute w-3 h-3 bg-white border border-gray-800 top-0 left-1/2 -mt-1.5 -ml-1.5 cursor-n-resize"></div>
-                    <div className="absolute w-3 h-3 bg-white border border-gray-800 bottom-0 left-1/2 -mb-1.5 -ml-1.5 cursor-s-resize"></div>
-                    <div className="absolute w-3 h-3 bg-white border border-gray-800 left-0 top-1/2 -ml-1.5 -mt-1.5 cursor-w-resize"></div>
-                    <div className="absolute w-3 h-3 bg-white border border-gray-800 right-0 top-1/2 -mr-1.5 -mt-1.5 cursor-e-resize"></div>
+                    <button 
+                      onClick={() => {
+                        // Toggle aspect ratio between free and 1:1
+                        setAspectRatio(aspectRatio ? null : 1);
+                      }}
+                      className={`flex items-center justify-center w-10 h-10 rounded-full transition-colors ${
+                        aspectRatio ? 'bg-blue-600 hover:bg-blue-500' : 'bg-gray-800 hover:bg-gray-700'
+                      }`}
+                      title={aspectRatio ? 'Free aspect ratio' : 'Lock aspect ratio (1:1)'}
+                    >
+                      <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                        <path fillRule="evenodd" d="M5 4a3 3 0 00-3 3v6a3 3 0 003 3h10a3 3 0 003-3V7a3 3 0 00-3-3H5zm-1 9v-1h5v2H5a1 1 0 01-1-1zm7 1h4a1 1 0 001-1v-1h-5v2zm0-4h5V8h-5v2zM9 8H4v2h5V8z" clipRule="evenodd" />
+                      </svg>
+                    </button>
+                    
+                    <button 
+                      onClick={() => setShowDimensionsOverlay(!showDimensionsOverlay)}
+                      className={`flex items-center justify-center w-10 h-10 rounded-full transition-colors ${
+                        showDimensionsOverlay ? 'bg-blue-600 hover:bg-blue-500' : 'bg-gray-800 hover:bg-gray-700'
+                      }`}
+                      title={showDimensionsOverlay ? 'Hide dimensions' : 'Show dimensions'}
+                    >
+                      <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                        <path d="M5 3a2 2 0 00-2 2v2a2 2 0 002 2h2a2 2 0 002-2V5a2 2 0 00-2-2H5zM5 11a2 2 0 00-2 2v2a2 2 0 002 2h2a2 2 0 002-2v-2a2 2 0 00-2-2H5zM11 5a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V5zM11 13a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z" />
+                      </svg>
+                    </button>
+                    
+                    <button 
+                      onClick={generateCrop}
+                      className="flex items-center justify-center w-10 h-10 rounded-full bg-green-600 hover:bg-green-500 transition-colors"
+                      title="Apply crop"
+                    >
+                      <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                        <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                      </svg>
+                    </button>
                   </div>
                 </div>
               </div>

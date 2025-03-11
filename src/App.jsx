@@ -4,6 +4,7 @@ import Navigation from './components/Navigation';
 import HomePage from './components/HomePage';
 import ToolWrapper from './components/ToolWrapper';
 import Footer from './components/Footer';
+import PDFCompressor from './components/tools/pdf/PDFCompressor';
 
 const App = () => {
   const [darkMode, setDarkMode] = useState(true);
@@ -55,22 +56,31 @@ const App = () => {
     window.scrollTo(0, 0);
   };
 
+  // Render the selected tool or home page
+  const renderContent = () => {
+    if (!selectedTool) {
+      return <HomePage onToolSelect={handleToolSelect} />;
+    }
+
+    // Add the PDFCompressor tool
+    if (selectedTool === 'pdf-compressor') {
+      return <PDFCompressor />;
+    }
+
+    return <ToolWrapper toolId={selectedTool} onBack={handleBackToHome} />;
+  };
+
   return (
-    <div className="min-h-screen bg-gray-50 dark:bg-gray-900 text-gray-900 dark:text-white transition-colors duration-300">
+    <div className="flex flex-col min-h-screen bg-gray-50 dark:bg-gray-900 text-gray-900 dark:text-gray-100">
       <Navigation 
         darkMode={darkMode} 
         toggleDarkMode={toggleDarkMode} 
+        selectedTool={selectedTool}
         onToolSelect={handleToolSelect}
       />
-      
-      <main>
-        {selectedTool ? (
-          <ToolWrapper toolId={selectedTool} onBack={handleBackToHome} />
-        ) : (
-          <HomePage onToolSelect={handleToolSelect} />
-        )}
+      <main className="flex-grow container mx-auto px-4 py-8">
+        {renderContent()}
       </main>
-      
       <Footer />
     </div>
   );

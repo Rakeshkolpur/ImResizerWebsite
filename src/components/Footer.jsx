@@ -4,8 +4,8 @@ const Footer = () => {
   return (
     <footer className="bg-white dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700 py-8">
       <div className="container mx-auto px-6">
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-8">
-          <div>
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-8 ">
+          <div >
             <h3 className="text-lg font-semibold mb-4 text-gray-800 dark:text-white">ImageResizer Pro</h3>
             <p className="text-gray-600 dark:text-gray-300 text-sm">
               The most advanced online image resizing tool with features for all your image editing needs.

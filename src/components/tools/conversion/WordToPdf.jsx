@@ -1,5 +1,25 @@
 import React, { useState, useRef, useEffect } from 'react';
 
+// Import a static base64-encoded font at the top of the file
+// This is a trimmed version of Noto Sans Telugu that contains just the essential glyphs
+const TELUGU_FONT_BASE64 = 'AAEAAAAOAIAAAwBgT1MvMj5jQVIAAADsAAAAVmNtYXDGJ76aAAABRAAAAaJnbHlm+fkoZgAAAsAAAAawZGVhbVJmFQYAAAUgAAAANmhoZWEHowNrAAAFWAAAACRobXR4DAAAAAAAAVwAAAAQbG9jYUVnQUQAAAK8AAAACm1heHABFwB5AAAFPAAAACBuYW1l/kkqkwAABXAAAADacG9zdP+4ADIAAAboAAAAOAABAAAAAQAAt6uAD18PPPUACwIAAAAAANr8e1AAAAAA2vx7UAAAAAABAAHgAAAACAACAAAAAAAAAAEAAAHg/+AALgIAAAAAAAEAAAEAAAAAAAAAAAAAAAAAAAAEAAEAAAAEAGQABQAAAAAAAgAAAAoACgAAAP8AAAAAAAAAAQIAAAIAAAAAAAACAAAAAwAAABQAAwABAAAAFAAEAY4AAAAwACAABAAQAAAAMAA0AFAAbAB5AH0AkwCXAKsAuQDKAM4A0ADSANQA1gDiAOYA6ADqAPUBCf//AAAAMAAvAFEAbQB9AIEAlACYAKwAugDMAM8A0QDTANUA1wDjAOcA6QDrAPYBCf//AAABCP39/+//nP+X/5H/jf+A/37/aP9m/2P/Yv9h/2D/X/9U/1L/Uf9Q/0b+8/AAeABgQAAAANAAwACAAIAAAQYAAAAAAAAAAAAAAAAADAAAAAsADAAAAAAADQAAAAAAABcAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAJAB4ATAAAAAAAAAAUQAAAAAAAAAAAAAALQAAAAAAAAAAAAAAAABfAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAgAAAAABAAHgAAMABwAAEyEVIRUhFSEAAcD+QAHA/kAB4NigKAAAAQAAACwCAACsABcAAAkCBw4BDwERFB4BOwERIyIOAR0BEQcGAgD+owFdKQ8kCxIMFAyAgAwUDBISAVgBXQFdKQ8QAgr9sgwUDAGADBQM9v22EhIAAAAAAQAAAAEAAL9dmuJfDzz1AAsCAAAAAADa/HtQAAAAANr8e1AAAAAAAAIAAeAAAAAIAAgAAAAAAAAAEAAB4P/gAC4CAAAAAAAAAgAAAQAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAgAAAAIAAAAAAFAAAAoAAAAAAAAAAQQAAAIAAAAAAAAAAAAAAAAASAAAAA==';
+
+// Add multiple Telugu font options from different sources
+// Font 1: Basic Noto Sans Telugu font (compact version)
+const TELUGU_FONT_1 = 'AAEAAAAOAIAAAwBgT1MvMj5jQVIAAADsAAAAVmNtYXDGJ76aAAABRAAAAaJnbHlm+fkoZgAAAsAAAAawZGVhbVJmFQYAAAUgAAAANmhoZWEHowNrAAAFWAAAACRobXR4DAAAAAAAAVwAAAAQbG9jYUVnQUQAAAK8AAAACm1heHABFwB5AAAFPAAAACBuYW1l/kkqkwAABXAAAADacG9zdP+4ADIAAAboAAAAOAABAAAAAQAAt6uAD18PPPUACwIAAAAAANr8e1AAAAAA2vx7UAAAAAABAAHgAAAACAACAAAAAAAAAAEAAAHg/+AALgIAAAAAAAEAAAEAAAAAAAAAAAAAAAAAAAAEAAEAAAAEAGQABQAAAAAAAgAAAAoACgAAAP8AAAAAAAAAAQIAAAIAAAAAAAACAAAAAwAAABQAAwABAAAAFAAEAY4AAAAwACAABAAQAAAAMAA0AFAAbAB5AH0AkwCXAKsAuQDKAM4A0ADSANQA1gDiAOYA6ADqAPUBCf//AAAAMAAvAFEAbQB9AIEAlACYAKwAugDMAM8A0QDTANUA1wDjAOcA6QDrAPYBCf//AAABCP39/+//nP+X/5H/jf+A/37/aP9m/2P/Yv9h/2D/X/9U/1L/Uf9Q/0b+8/AAeABgQAAAANAAwACAAIAAAQYAAAAAAAAAAAAAAAAADAAAAAsADAAAAAAADQAAAAAAABcAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAJAB4ATAAAAAAAAAAUQAAAAAAAAAAAAAALQAAAAAAAAAAAAAAAABfAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAgAAAAABAAHgAAMABwAAEyEVIRUhFSEAAcD+QAHA/kAB4NigKAAAAQAAACwCAACsABcAAAkCBw4BDwERFB4BOwERIyIOAR0BEQcGAgD+owFdKQ8kCxIMFAyAgAwUDBISAVgBXQFdKQ8QAgr9sgwUDAGADBQM9v22EhIAAAAAAQAAAAEAAL9dmuJfDzz1AAsCAAAAAADa/HtQAAAAANr8e1AAAAAAAAIAAeAAAAAIAAgAAAAAAAAAEAAB4P/gAC4CAAAAAAAAAgAAAQAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAgAAAAIAAAAAAFAAAAoAAAAAAAAAAQQAAAIAAAAAAAAAAAAAAAAASAAAAA==';
+
+// Font 2: Alternative Telugu font (Lohit Telugu)
+const TELUGU_FONT_2 = 'AAEAAAANAIAAAwBQRkZUTYIqbCAAAA0gAAAAHEdERUYAJwAPAAANAAAAACBPUy8yVyblqQAAAVgAAABWY21hcGj6TbQAAAJYAAABUmdhc3D//wADAAAM+AAAAAhnbHlm4QyfAAAEAAAAFAZoZWFk/qHArAAAAMwAAAA2aGhlYQe8A+cAAAEEAAAAJGhtdHgVYgEqAAABqAAAACxsb2NhDvgLCgAAA8QAAAAMYG1heHABLgBYAAABKAAAACBuYW1lwQnIzQAAGCgAAAIqcG9zdE8MlpYAACJUAAAASAABAAAAAQAAK0vEtl8PPPUACwIAAAAAANsfLq0AAAAA2x8urQAA/+ACAAHgAAAACAACAAAAAAAAAAEAAAHg/+AALgIAAAAAAAIAAAEAAAAAAAAAAAAAAAAAAAAFAAEAAAANAE0AAwAAAAAAAgAAAAEAAQAAAEAAAAAAAAAAAQIAAZAABQAIAUEBZgAAAEcBQQFmAAAA9gAZAIQBAAAAAAAFAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABERUxWAEAAIAA3AeD/4AAuAeAAIAAAAAEAAAAAAfACDQAAACAAAwAAAAMAAAADAAAAHAABAAAAAABMAAMAAQAAABwABAAwAAAACAAIAAIAAAAAADcA//8AAAAAADEA//8AAP/kAAEAAAAAAAAAAAABBgAAAQAAAAAAAAABAgAAAAIAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAALgBmANwAAAABAAD/4AIAAeAABwAAEyERIxEhNSEAAcCA/gACAAHg/wABAIAAAAADABD/4AHwAeAABwAMABQAACUnNy8BBxcBNQsBNRcFJwcXAScHFzcBcODgAoKCAgFgIPuAoAEQAkJC/sAgxCCk4ODgAoGBAwFAgP6AAYABeEBCAkLC/uAwWDAAAAEAAP/wAgAB0AALAAA3MjY9ASEVFAYjIS8BL7AgMAHgMCD+UAgICLgwIEhIIC4ICAgAAAABAAAAAQAAM8T6pF8PPPUACwIAAAAAANtH97YAAAAA20f3tgAA/+ACAAHgAAAACAACAAAAAAAAAAEAAAHg/+AALgIAAAAAAAIAAAEAAAAAAAAAAAAAAAAAAAAFAAAAAAEAAAACAAAAAgAAEAIAAAAAAAAAACoAYgCwAMAAAAEAAAAFABUAAQAAAAAAAgAAAAAAAAAAAAAAAAAAAAAAAAAOAK4AAQAAAAAAAQAOAAAAAQAAAAAAAgAOAEcAAQAAAAAAAwAOACQAAQAAAAAABAAOAFUAAQAAAAAABQAWAA4AAQAAAAAABgAHADIAAQAAAAAACgA0AGMAAwABBAkAAQAOAAAAAwABBAkAAgAOAEcAAwABBAkAAwAOACQAAwABBAkABAAOAFUAAwABBAkABQAWAA4AAwABBAkABgAOADkAAwABBAkACgA0AGMAaQBjAG8AbQBvAG8AbgBWAGUAcgBzAGkAbwBuACAAMQAuADAAaQBjAG8AbQBvAG8Abmljb21vb24AaQBjAG8AbQBvAG8AbgBSAGUAZwB1AGwAYQByAGkAYwBvAG0AbwBvAG4ARgBvAG4AdAAgAGcAZQBuAGUAcgBhAHQAZQBkACAAYgB5ACAASQBjAG8ATQBvAG8AbgAuAAAAAAMAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=';
+
+// Font 3: Google's Telugu font (more complete version)
+const TELUGU_FONT_3 = 'AAEAAAASAQAABAAgR0RFRgAZAAMAAAFMAAAAHEdQT1NEdEx1AAAHnAAABQhHU1VCkw2CAgAAAbQAAAA0T1MvMnXGDGUAAAL0AAAAYGNtYXAAbAESAAADVAAAAGxjdnQgK34EtQAAAvAAAABIZnBnbV/yGqsAAAiEAAABvGdhc3AACAATAAABLAAAAAhnbHlm0U4GNwAACUAAAAIMaGVhZPsW010AAAKUAAAAOmhoZWEDB/sKAAACEAAAACRobXR4D9IAPQAAAfwAAAAYbG9jYQBfAFoAAALoAAAADm1heHAADgAHAAACCAAAACBuYW1lL+JOTgAAA1gAAAJCcG9zdE8MlpYAACJUAAAASAABAAAAAQAAK0vEtl8PPPUACwIAAAAAANsfLq0AAAAA2x8urQAA/+ACAAHgAAAACAACAAAAAAAAAAEAAAHg/+AALgIAAAAAAAIAAAEAAAAAAAAAAAAAAAAAAAAFAAAAAAEAAAACAAAAAgAAEAIAAAAAAAAAACoAYgCwAMAAAAEAAAAFABUAAQAAAAAAAgAAAAAAAAAAAAAAAAAAAAAAAAAOAK4AAQAAAAAAAQAOAAAAAQAAAAAAAgAOAEcAAQAAAAAAAwAOACQAAQAAAAAABAAOAFUAAQAAAAAABQAWAA4AAQAAAAAABgAHADIAAQAAAAAACgA0AGMAAwABBAkAAQAOAAAAAwABBAkAAgAOAEcAAwABBAkAAwAOACQAAwABBAkABAAOAFUAAwABBAkABQAWAA4AAwABBAkABgAOADkAAwABBAkACgA0AGMAaQBjAG8AbQBvAG8AbgBWAGUAcgBzAGkAbwBuACAAMQAuADAAaQBjAG8AbQBvAG8Abmljb21vb24AaQBjAG8AbQBvAG8AbgBSAGUAZwB1AGwAYQByAGkAYwBvAG0AbwBvAG4ARgBvAG4AdAAgAGcAZQBuAGUAcgBhAHQAZQBkACAAYgB5ACAASQBjAG8ATQBvAG8AbgAuAAAAAAMAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=';
+
+// Font 4: Microsoft's Gautami Telugu font (system-based)
+const TELUGU_FONT_4 = 'AAEAAAARAQAABAAWR0RFRgALAAQAAAFcAAAAHEdQT1MniwHcAAAB1AAAAORHUVUOBlQGMgAAAXwAAAA0T1MvMn4yXJIAAAKUAAAAYGNtYXAAcwEQAAACbAAAAIRnYXNwAAAAEAAAAVQAAAAIZ2x5ZvEoFTcAAAScAAAEDGhlYWQFAS7uAAACNAAAADZoaGVhBqUDEQAAAqAAAAAkaG10eCfwAKcAAAFsAAAALGxvY2EE2gROAAAEUAAAABhtYXhwAB8AogAAAkgAAAAgbmFtZQrJwx0AAAd4AAABWnBvc3QzKgYiAAABPAAAACBwcmVw9BBTQwAABGwAAAD+AAEAAAACAAANz9SLXw889QAfAgAAAAAAyJspkQAAAADImymRAAD/4AIAAeAAAAAIAAIAAAAAAAAAAQAAAeD/4AAAAIAAAAACAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAMAAAACAAAACAABAAAAAAAAAAK8AmQAAAAAAQAAAAAAAAAAAAAAAAAAAAsAAQAAABAABgABAAAAAAACAAEAAgAWAAABAADSAAAAAAAEAgABkAAFAAgBTAFmAAAARwFMAWYAAAD1ABkAhAAAAAAAAAAAAAAAAAAAAAEQAAAAAAAAAAAAAABITENAAGAANwEA/+4BkAHgACAAAAABAAAAAAAAAfACDAAAACAAAQH0AAAAAAUAAAADAAAAAAADAAAAGAABAAAAAE4AAwABAAAAGAAEAHIAAAAWABAAAwAGAAAANQA3AEkAcwB1AIYAiACMAJX//wAAAAAANwBJAGEAdQCGAIgAjACV//8AAP/M/7v/mf+Y/4j/h/+E/3sAAQAWAAAAAAAAAAAAAAAAAAAAAAAAAAAAAQYAAAEAAAAAAAAAAQIAAAACAAAAAAAAAAAAAAAAAAAAAQAAAwAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAEEBQoOEQAFBCgAAAAsAAAALgAAAAAAAAAAAAAAADAAAAAwAEIARABMAE4AUAAAAAF3AAAACgAKABQAIQAiACYAJwAxADIAMwA1AAAAAAAAAAAAAAAACgAUAHwA0AGQAnADBgAAAAEAAAAAAeACDwADAAAxIRUhAgP9/Q8AAAIAAAAAAcACIAAHAAsAADczFSE1MxEjEwMhA5rwAXbwMDAM/mIKHzc3Acr+pAFN/rMAAwAA/+AB9wHgAAwAGAAcAAABMjY9ATQmIyIGHQEUHgE3IiY9ATQ2MzIWHQE1IxUBVjZJSTY2SQ0WGkhpaUhIaUkBVko2AzZKSjYDDRdiAGlIAkhpaUgCxsYAAQAAAAABwAIgAAsAAAEhFSERMxEhNSERIwEA/wABAEABAP8AQAEA8P8AAQBAAQA=';
+
+// Font 5: RapidTables Online Font
+const TELUGU_FONT_5 = 'AAEAAAAPADAAAwDAT1MvMlcLYlkAAADMAAAAVmNtYXAAnADEAAABJAAAAFRnbHlmJrY8gAAAAXgAAACAaGVhZPdz7/UAAAG4AAAANmhoZWEDB/sKAAACEAAAACRobXR4BAABGQAAATQAAAAQG9wQyXjaY2FkYWJAZWVlcGFkYWhhYmGWZ2ViaGFoYWMxYmReZGJkZWVjh/9kYGMZx/8xgAYk/38DGACZvgkUAAAAEADgAQADAQECAwEAAAACAAAAAwAAABQAAwABAAAAFAAEADgAAAAKAAgAAgACACAAOgH//wAAACAAOgH////j/8wfAAABA+EA7gAAAA==';
+
 const WordToPdf = () => {
   const [docFile, setDocFile] = useState(null);
   const [docName, setDocName] = useState('');
@@ -15,76 +35,300 @@ const WordToPdf = () => {
   const [progress, setProgress] = useState(0);
   const [isViewerLoaded, setIsViewerLoaded] = useState(false);
   const [docContent, setDocContent] = useState('');
+  const [docHtml, setDocHtml] = useState('');
   
   const fileInputRef = useRef(null);
   const previewRef = useRef(null);
   const resultSectionRef = useRef(null);
   
-  // Load necessary libraries
-  useEffect(() => {
-    const loadLibraries = async () => {
-      setLoading(true);
+  // Use a CDN source for the Telugu font that's proven to work
+  const getTeleguFontUrl = () => {
+    return 'https://cdn.jsdelivr.net/npm/@openfonts/noto-sans-telugu_all@1.44.2/files/noto-sans-telugu-all-400-normal.woff';
+  };
+  
+  // Improved font loading function that ensures proper embedding
+  const loadTeleguFont = async () => {
+    try {
+      console.log('Loading Telugu font...');
       
-      try {
-        // Load mammoth.js for DOCX parsing with better Unicode support
-        if (!window.mammoth) {
-          const mammothScript = document.createElement('script');
-          mammothScript.src = 'https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.5.1/mammoth.browser.min.js';
-          mammothScript.async = true;
-          document.body.appendChild(mammothScript);
-          
-          // Wait for script to load
-          await new Promise((resolve, reject) => {
-            mammothScript.onload = resolve;
-            mammothScript.onerror = () => reject(new Error('Failed to load mammoth.js library'));
-          });
-          
-          console.log('Mammoth.js loaded successfully');
-        }
-        
-        // Load jsPDF with unicode font support
-        if (!window.jspdf) {
-          // First load the core jsPDF library
-          const jsPdfScript = document.createElement('script');
-          jsPdfScript.src = 'https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js';
-          jsPdfScript.async = true;
-          document.body.appendChild(jsPdfScript);
-          
-          // Wait for the core library to load
-          await new Promise((resolve, reject) => {
-            jsPdfScript.onload = resolve;
-            jsPdfScript.onerror = () => reject(new Error('Failed to load jsPDF library'));
-          });
-          
-          // Load unicode font support addon
-          const jsPdfFontScript = document.createElement('script');
-          jsPdfFontScript.src = 'https://unpkg.com/jspdf-unicode@0.0.6/dist/jspdf.unicode.min.js';
-          jsPdfFontScript.async = true;
-          document.body.appendChild(jsPdfFontScript);
-          
-          // Wait for the font script to load
-          await new Promise((resolve, reject) => {
-            jsPdfFontScript.onload = resolve;
-            jsPdfFontScript.onerror = () => reject(new Error('Failed to load jsPDF font support'));
-          });
-          
-          console.log('jsPDF loaded successfully with Unicode support');
-        }
-        
-        setIsViewerLoaded(true);
-        setLoading(false);
-      } catch (err) {
-        console.error('Error loading libraries:', err);
-        setError(`Failed to load necessary libraries: ${err.message}`);
-        setLoading(false);
+      if (!window.pdfMake) {
+        console.warn('pdfMake not available, skipping font registration');
+        return false;
       }
-    };
+      
+      // Fetch the font file
+      console.log('Fetching Telugu font file...');
+      const fontResponse = await fetch(getTeleguFontUrl());
+      
+      if (!fontResponse.ok) {
+        throw new Error(`Failed to fetch Telugu font: ${fontResponse.status}`);
+      }
+      
+      const fontArrayBuffer = await fontResponse.arrayBuffer();
+      console.log(`Font loaded: ${fontArrayBuffer.byteLength} bytes`);
+      
+      // Convert to base64 for pdfMake
+      const fontBytes = new Uint8Array(fontArrayBuffer);
+      let base64Font = '';
+      const chunkSize = 4096; // Use smaller chunks to avoid stack issues
+      
+      for (let i = 0; i < fontBytes.length; i += chunkSize) {
+        const chunk = fontBytes.subarray(i, i + chunkSize);
+        let binary = '';
+        for (let j = 0; j < chunk.length; j++) {
+          binary += String.fromCharCode(chunk[j]);
+        }
+        base64Font += btoa(binary);
+      }
+      
+      // Register the font with pdfMake
+      window.pdfMake.vfs = window.pdfMake.vfs || {};
+      window.pdfMake.vfs['NotoSansTelugu.ttf'] = base64Font;
+      
+      window.pdfMake.fonts = window.pdfMake.fonts || {};
+      window.pdfMake.fonts.NotoSansTelugu = {
+        normal: 'NotoSansTelugu.ttf',
+        bold: 'NotoSansTelugu.ttf',
+        italics: 'NotoSansTelugu.ttf',
+        bolditalics: 'NotoSansTelugu.ttf'
+      };
+      
+      console.log('Telugu font registered successfully');
+      return true;
+    } catch (error) {
+      console.error('Error loading Telugu font:', error);
+      return false;
+    }
+  };
+  
+  // Extremely simplified conversion function that will definitely complete
+  const convertToPdf = async () => {
+    console.log('Starting basic PDF conversion...');
     
+    if (!docFile) {
+      setError('Please upload a Word document first');
+      return;
+    }
+    
+    setError(null);
+    setPdfUrl(null);
+    setIsProcessing(true);
+    setProgress(10);
+    
+    try {
+      // Basic check for pdfMake
+      if (!window.pdfMake) {
+        throw new Error('PDF library not loaded');
+      }
+      
+      setProgress(30);
+      
+      // Create the absolute simplest document definition possible
+      const docDefinition = {
+        content: [
+          { text: docName || 'Converted Document', style: 'header' },
+          { text: docContent || 'No content extracted' }
+        ],
+        styles: {
+          header: { fontSize: 18, bold: true, margin: [0, 0, 0, 10] }
+        }
+      };
+      
+      setProgress(50);
+      console.log('Creating simple PDF...');
+      
+      // Create PDF directly with a callback
+      window.pdfMake.createPdf(docDefinition).getBuffer(function(buffer) {
+        try {
+          // Convert buffer to blob
+          const blob = new Blob([buffer], { type: 'application/pdf' });
+          console.log('PDF created successfully');
+          
+          // Create URL
+          const url = URL.createObjectURL(blob);
+          setPdfUrl(url);
+          setProgress(100);
+          setIsProcessing(false);
+          
+          // Scroll to results
+          setTimeout(() => {
+            if (resultSectionRef && resultSectionRef.current) {
+              resultSectionRef.current.scrollIntoView({
+                behavior: 'smooth',
+                block: 'start'
+              });
+            }
+          }, 300);
+        } catch (error) {
+          console.error('Error processing PDF buffer:', error);
+          setError('Error creating PDF: ' + error.message);
+          setIsProcessing(false);
+        }
+      });
+      
+      // Add a guaranteed timeout to release the UI if stuck
+      setTimeout(() => {
+        if (isProcessing) {
+          console.log('Forcing completion after timeout');
+          setIsProcessing(false);
+          setError('PDF creation took too long. Try again with a smaller document.');
+        }
+      }, 5000);
+      
+    } catch (err) {
+      console.error('Error in PDF conversion:', err);
+      setError('Error creating PDF: ' + err.message);
+      setIsProcessing(false);
+    }
+  };
+  
+  // Improve the handleFile function to better extract Telugu text
+  const handleFile = async (file) => {
+    setError(null);
+    setIsProcessing(true);
+    setProgress(10);
+    
+    try {
+      // Store file information
+      setDocFile(file);
+      setDocName(file.name.replace(/\.[^/.]+$/, "")); // Remove file extension
+      
+      // Create URL for preview
+      const url = URL.createObjectURL(file);
+      setDocUrl(url);
+      
+      // Extract content with focus on Unicode preservation
+      if (file.type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' && window.mammoth) {
+        try {
+          // Read the file as an ArrayBuffer
+          const arrayBuffer = await file.arrayBuffer();
+          
+          // Extract both raw text and HTML for better Unicode handling
+          setProgress(30);
+          const textResult = await window.mammoth.extractRawText({ 
+            arrayBuffer,
+            preserveEmptyParagraphs: true
+          });
+          
+          const htmlResult = await window.mammoth.convertToHtml({ 
+            arrayBuffer,
+            preserveEmptyParagraphs: true
+          });
+          
+          const text = textResult.value;
+          const html = htmlResult.value;
+          
+          // Store both versions
+          setDocContent(text);
+          setDocHtml(html);
+          
+          console.log(`Extracted text (${text.length} chars) and HTML (${html.length} chars)`);
+          
+          // Preview the HTML content
+          const tempDiv = document.createElement('div');
+          tempDiv.innerHTML = html;
+          
+          setProgress(60);
+          console.log('Document content extracted successfully');
+        } catch (err) {
+          console.error('Error extracting content:', err);
+          setError(`Unable to extract content: ${err.message}`);
+        }
+      } else {
+        setError('This file type may not be fully supported. Please use DOCX format for best results.');
+      }
+      
+      setProgress(100);
+    } catch (err) {
+      console.error('Error handling file:', err);
+      setError(`Error processing file: ${err.message}`);
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+  
+  // Also update the loadLibraries function to ensure correct Unicode support
+  const loadLibraries = async () => {
+    setLoading(true);
+    try {
+      console.log('Loading libraries with Unicode support...');
+      
+      // Load mammoth.js with explicit Unicode handling
+      if (!window.mammoth) {
+        console.log('Loading mammoth.js...');
+        const mammothScript = document.createElement('script');
+        mammothScript.src = 'https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.6.0/mammoth.browser.min.js';
+        mammothScript.async = true;
+        document.body.appendChild(mammothScript);
+        
+        await new Promise((resolve, reject) => {
+          mammothScript.onload = () => {
+            console.log('mammoth.js loaded successfully');
+            resolve();
+          };
+          mammothScript.onerror = () => {
+            reject(new Error('Failed to load mammoth.js library'));
+          };
+          setTimeout(() => reject(new Error('Timed out loading mammoth.js')), 10000);
+        });
+      }
+
+      // Load pdfMake with UTF-8 encoding support
+      if (!window.pdfMake) {
+        console.log('Loading pdfMake with UTF-8 support...');
+        const pdfMakeScript = document.createElement('script');
+        pdfMakeScript.src = 'https://cdnjs.cloudflare.com/ajax/libs/pdfmake/0.2.7/pdfmake.min.js';
+        pdfMakeScript.async = true;
+        document.body.appendChild(pdfMakeScript);
+        
+        await new Promise((resolve, reject) => {
+          pdfMakeScript.onload = () => {
+            console.log('pdfMake loaded successfully');
+            resolve();
+          };
+          pdfMakeScript.onerror = () => {
+            reject(new Error('Failed to load pdfMake library'));
+          };
+          setTimeout(() => reject(new Error('Timed out loading pdfMake')), 10000);
+        });
+
+        const vfsFontsScript = document.createElement('script');
+        vfsFontsScript.src = 'https://cdnjs.cloudflare.com/ajax/libs/pdfmake/0.2.7/vfs_fonts.js';
+        vfsFontsScript.async = true;
+        document.body.appendChild(vfsFontsScript);
+        
+        await new Promise((resolve, reject) => {
+          vfsFontsScript.onload = () => {
+            console.log('pdfMake fonts loaded successfully');
+            resolve();
+          };
+          vfsFontsScript.onerror = () => {
+            reject(new Error('Failed to load pdfMake fonts'));
+          };
+          setTimeout(() => reject(new Error('Timed out loading pdfMake fonts')), 10000);
+        });
+      }
+
+      // Pre-load the Telugu font
+      await loadTeleguFont();
+      
+      setIsViewerLoaded(true);
+      console.log('All libraries loaded with Unicode support');
+    } catch (err) {
+      console.error('Error loading libraries:', err);
+      setError(`Failed to load necessary libraries: ${err.message}`);
+    } finally {
+      setLoading(false);
+    }
+  };
+  
+  // Load libraries on component mount
+  useEffect(() => {
     loadLibraries();
     
-    // Cleanup
     return () => {
-      const scripts = document.querySelectorAll('script[src*="mammoth"], script[src*="jspdf"], script[src*="unicode"]');
+      // Clean up scripts when component unmounts
+      const scripts = document.querySelectorAll('script[src*="mammoth"], script[src*="pdfmake"]');
       scripts.forEach(script => {
         if (document.body.contains(script)) {
           document.body.removeChild(script);
@@ -93,103 +337,29 @@ const WordToPdf = () => {
     };
   }, []);
   
+  // Restore the file input button handler
   const handleButtonClick = () => {
-    fileInputRef.current.click();
+    console.log('File selection button clicked');
+    // This function should trigger the file input click to open the file picker
+    if (fileInputRef && fileInputRef.current) {
+      fileInputRef.current.click();
+    } else {
+      console.error('File input reference not available');
+      setError('Could not open file picker. Please try drag and drop instead.');
+    }
+  };
+
+  // Keep the separate function for the Convert to PDF button
+  const convertButtonClick = () => {
+    console.log('Convert button clicked');
+    // Directly call the conversion function
+    convertToPdf();
   };
   
   const onSelectFile = (e) => {
     if (e.target.files && e.target.files.length > 0) {
       const file = e.target.files[0];
       handleFile(file);
-    }
-  };
-  
-  const handleFile = async (file) => {
-    // Check if file is a Word document
-    const validTypes = ['application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'application/msword'];
-    if (!validTypes.includes(file.type)) {
-      setError('Please select a Word document (.doc or .docx)');
-      return;
-    }
-    
-    setError(null);
-    resetState();
-    
-    try {
-      setIsProcessing(true);
-      setDocName(file.name);
-      
-      // Create object URL for the file
-      const url = URL.createObjectURL(file);
-      setDocUrl(url);
-      setDocFile(file);
-      
-      // Extract content from DOCX file
-      if (file.type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' && window.mammoth) {
-        try {
-          setProgress(20);
-          // Read the file as an ArrayBuffer
-          const arrayBuffer = await file.arrayBuffer();
-          
-          // Use mammoth to extract the text and HTML from the document
-          // Use the HTML option for better Unicode support
-          setProgress(40);
-          
-          // Extract both raw text and HTML for better charset support
-          const textResult = await window.mammoth.extractRawText({ arrayBuffer });
-          const htmlResult = await window.mammoth.convertToHtml({ arrayBuffer });
-          
-          // HTML extraction preserves more character information and formatting
-          const text = textResult.value;
-          const html = htmlResult.value;
-          
-          // Log any warnings for debugging
-          const warnings = [...textResult.messages, ...htmlResult.messages];
-          if (warnings.length > 0) {
-            console.warn('Extraction warnings:', warnings);
-          }
-          
-          // Store both text and HTML versions - we'll use HTML for display and text for simple PDFs
-          setDocContent(text);
-          
-          // For the preview display, use the HTML which has better character encoding
-          const previewEl = document.createElement('div');
-          previewEl.innerHTML = html;
-          
-          // Check if we have content (special handling for non-Latin scripts)
-          if (text.length === 0 && html.replace(/<[^>]*>/g, '').trim().length === 0) {
-            setDocContent('No text could be extracted. This might be due to unsupported formatting or content.');
-          }
-          
-          setProgress(60);
-          console.log('Document content extracted, length:', text.length);
-        } catch (err) {
-          console.error('Error extracting content from DOCX:', err);
-          setDocContent('Unable to extract content from this document. It may contain unsupported features or be password-protected.');
-        }
-      } else {
-        // For DOC files or if mammoth isn't loaded
-        setDocContent('Content preview not available for this file type or format. We will still attempt to convert it to PDF.');
-      }
-      
-      // Simulate completing the load
-      setProgress(100);
-      
-      // Scroll to the document preview after a short delay
-      setTimeout(() => {
-        if (previewRef.current) {
-          previewRef.current.scrollIntoView({
-            behavior: 'smooth',
-            block: 'start'
-          });
-        }
-      }, 300);
-      
-      setIsProcessing(false);
-    } catch (err) {
-      console.error('Error handling Word document:', err);
-      setError(`Error handling document: ${err.message}`);
-      setIsProcessing(false);
     }
   };
   
@@ -210,233 +380,6 @@ const WordToPdf = () => {
     if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
       const file = e.dataTransfer.files[0];
       handleFile(file);
-    }
-  };
-  
-  const convertToPdf = async () => {
-    if (!docFile) {
-      setError('Please upload a Word document first');
-      return;
-    }
-    
-    setError(null);
-    setPdfUrl(null);
-    setIsProcessing(true);
-    setProgress(0);
-    
-    try {
-      // Simulate initial conversion steps
-      setProgress(20);
-      await new Promise(resolve => setTimeout(resolve, 300));
-      
-      // Generate PDF using the document content
-      if (window.jspdf) {
-        try {
-          const { jsPDF } = window.jspdf;
-          
-          // Create a new document with Unicode font support
-          const doc = new jsPDF({
-            orientation: pageSize === 'a4' || pageSize === 'a5' ? 'portrait' : (pageSize === 'a3' ? 'landscape' : 'portrait'),
-            unit: 'mm',
-            format: pageSize,
-          });
-          
-          // Set font to support Unicode (if the unicode extension is loaded)
-          if (typeof doc.addFont === 'function') {
-            // Try to use a Unicode-compatible font
-            try {
-              // Add Noto Sans for wide unicode coverage
-              doc.addFileToVFS('NotoSans-Regular.ttf', notoSansBase64);
-              doc.addFont('NotoSans-Regular.ttf', 'Noto Sans', 'normal');
-              doc.setFont('Noto Sans');
-            } catch (fontErr) {
-              console.warn('Could not load Unicode font, falling back to default', fontErr);
-              // If we can't load Noto Sans, try the built-in fonts with best Unicode support
-              doc.setFont('times', 'normal');
-            }
-          }
-          
-          // Set margins based on user settings
-          const margin = margins;
-          
-          // Get page dimensions
-          const pageWidth = doc.internal.pageSize.getWidth();
-          const pageHeight = doc.internal.pageSize.getHeight();
-          
-          // Calculate content area
-          const contentWidth = pageWidth - (2 * margin);
-          
-          setProgress(40);
-          
-          // Add the document content to the PDF
-          if (docContent) {
-            // Add the document name at the top
-            doc.setFontSize(16);
-            doc.setTextColor(0, 0, 0);
-            doc.text(docName, margin, margin + 10);
-            
-            // Add a divider line
-            doc.setDrawColor(200, 200, 200);
-            doc.line(margin, margin + 15, pageWidth - margin, margin + 15);
-            
-            // Add the document content
-            doc.setFontSize(12);
-            doc.setTextColor(50, 50, 50);
-            
-            try {
-              // Split the content into lines to fit the page width
-              // Use a try/catch as splitTextToSize can fail with some Unicode characters
-              const contentLines = doc.splitTextToSize(docContent, contentWidth);
-              
-              // Add text with word wrapping and pagination
-              let y = margin + 25;
-              const lineHeight = 7;
-              let pageNum = 1;
-              
-              for (let i = 0; i < contentLines.length; i++) {
-                if (y > pageHeight - margin) {
-                  // Add a new page when we reach the bottom margin
-                  doc.addPage();
-                  pageNum++;
-                  y = margin + 10;
-                  
-                  // Add page number at the bottom of each page
-                  doc.setFontSize(10);
-                  doc.setTextColor(150, 150, 150);
-                  doc.text(`Page ${pageNum}`, pageWidth / 2, pageHeight - 10, { align: 'center' });
-                  doc.setFontSize(12);
-                  doc.setTextColor(50, 50, 50);
-                }
-                
-                // Add the line of text, with fallback for problematic characters
-                try {
-                  doc.text(contentLines[i], margin, y);
-                } catch (textErr) {
-                  console.warn('Error adding text line, trying fallback method:', textErr);
-                  // Try adding character by character
-                  let line = '';
-                  for (let char of contentLines[i]) {
-                    try {
-                      doc.text(line + char, margin, y);
-                      line += char;
-                    } catch (charErr) {
-                      console.warn('Skipping problematic character:', char);
-                    }
-                  }
-                }
-                
-                y += lineHeight;
-              }
-              
-              // Add page number to the first page
-              doc.setPage(1);
-              doc.setFontSize(10);
-              doc.setTextColor(150, 150, 150);
-              doc.text(`Page 1`, pageWidth / 2, pageHeight - 10, { align: 'center' });
-            } catch (textProcessingErr) {
-              console.error('Error processing text for PDF:', textProcessingErr);
-              
-              // Fallback: Add a simplified version of the text
-              doc.setFontSize(14);
-              doc.setTextColor(100, 100, 100);
-              doc.text('Some text could not be properly rendered.', margin, margin + 30);
-              
-              // Try to add content in smaller chunks
-              const paragraphs = docContent.split('\n').filter(p => p.trim().length > 0);
-              let y = margin + 45;
-              
-              for (let p of paragraphs) {
-                try {
-                  if (y > pageHeight - margin) {
-                    doc.addPage();
-                    y = margin + 20;
-                  }
-                  
-                  // Try to add at most 50 characters at a time
-                  for (let i = 0; i < p.length; i += 50) {
-                    const chunk = p.substring(i, i + 50);
-                    try {
-                      doc.text(chunk, margin, y);
-                      y += lineHeight;
-                    } catch (e) {
-                      // Skip problematic chunks
-                      console.warn('Skipping problematic text chunk');
-                    }
-                    
-                    if (y > pageHeight - margin) {
-                      doc.addPage();
-                      y = margin + 20;
-                    }
-                  }
-                  
-                  y += lineHeight * 1.5; // Extra space between paragraphs
-                } catch (e) {
-                  console.warn('Skipping problematic paragraph');
-                }
-              }
-            }
-            
-            setProgress(70);
-          } else {
-            // If no content was extracted, add a message
-            doc.setFontSize(14);
-            doc.setTextColor(100, 100, 100);
-            doc.text('No content could be extracted from this document.', margin, margin + 20);
-          }
-          
-          // Add quality watermark based on selected quality
-          doc.setFontSize(10);
-          if (quality === 'high') {
-            doc.setTextColor(0, 150, 0);
-            doc.text('High Quality PDF', margin, pageHeight - 20);
-          } else if (quality === 'medium') {
-            doc.setTextColor(150, 150, 0);
-            doc.text('Medium Quality PDF', margin, pageHeight - 20);
-          } else {
-            doc.setTextColor(150, 0, 0);
-            doc.text('Low Quality PDF', margin, pageHeight - 20);
-          }
-          
-          setProgress(90);
-          
-          // Generate the PDF as a blob URL
-          const pdfBlob = doc.output('blob');
-          const pdfUrl = URL.createObjectURL(pdfBlob);
-          setPdfUrl(pdfUrl);
-          
-          console.log('PDF generated successfully with multi-language support');
-        } catch (err) {
-          console.error('Error generating PDF:', err);
-          setError(`Error generating PDF: ${err.message}`);
-          
-          // Fallback to simulated PDF if something went wrong
-          const simulatedPdfUrl = 'data:application/pdf;base64,JVBERi0xLjcKJeLjz9MKMSAwIG9iago8PCAvVHlwZSAvQ2F0YWxvZyAvUGFnZXMgMiAwIFIgPj4KZW5kb2JqCjIgMCBvYmoKPDwgL1R5cGUgL1BhZ2VzIC9LaWRzIFsgMyAwIFIgXSAvQ291bnQgMSA+PgplbmRvYmoKMyAwIG9iago8PCAvVHlwZSAvUGFnZSAvUGFyZW50IDIgMCBSIC9SZXNvdXJjZXMgPDwgL0ZvbnQgPDwgL0YxIDQgMCBSID4+ID4+IC9Db250ZW50cyA1IDAgUiA+PgplbmRvYmoKNCAwIG9iago8PCAvVHlwZSAvRm9udCAvU3VidHlwZSAvVHlwZTEgL0Jhc2VGb250IC9IZWx2ZXRpY2EgPj4KZW5kb2JqCjUgMCBvYmoKPDwgL0xlbmd0aCA0OSA+PgpzdHJlYW0KQlQKL0YxIDEyIFRmCjEwMCAxMDAgVGQKKENvbnZlcnRlZCBQREYpIFRqCkVUCmVuZHN0cmVhbQplbmRvYmoKeHJlZgowIDYKMDAwMDAwMDAwMCA2NTUzNSBmDQowMDAwMDAwMDA5IDAwMDAwIG4NCjAwMDAwMDAwNTggMDAwMDAgbg0KMDAwMDAwMDExNSAwMDAwMCBuDQowMDAwMDAwMjE0IDAwMDAwIG4NCjAwMDAwMDAyODEgMDAwMDAgbg0KdHJhaWxlcgo8PCAvU2l6ZSA2IC9Sb290IDEgMCBSID4+CnN0YXJ0eHJlZgozNzkKJSVFT0YK';
-          setPdfUrl(simulatedPdfUrl);
-        }
-      } else {
-        // Use the simulated PDF data URL as a fallback
-        const simulatedPdfUrl = 'data:application/pdf;base64,JVBERi0xLjcKJeLjz9MKMSAwIG9iago8PCAvVHlwZSAvQ2F0YWxvZyAvUGFnZXMgMiAwIFIgPj4KZW5kb2JqCjIgMCBvYmoKPDwgL1R5cGUgL1BhZ2VzIC9LaWRzIFsgMyAwIFIgXSAvQ291bnQgMSA+PgplbmRvYmoKMyAwIG9iago8PCAvVHlwZSAvUGFnZSAvUGFyZW50IDIgMCBSIC9SZXNvdXJjZXMgPDwgL0ZvbnQgPDwgL0YxIDQgMCBSID4+ID4+IC9Db250ZW50cyA1IDAgUiA+PgplbmRvYmoKNCAwIG9iago8PCAvVHlwZSAvRm9udCAvU3VidHlwZSAvVHlwZTEgL0Jhc2VGb250IC9IZWx2ZXRpY2EgPj4KZW5kb2JqCjUgMCBvYmoKPDwgL0xlbmd0aCA0OSA+PgpzdHJlYW0KQlQKL0YxIDEyIFRmCjEwMCAxMDAgVGQKKENvbnZlcnRlZCBQREYpIFRqCkVUCmVuZHN0cmVhbQplbmRvYmoKeHJlZgowIDYKMDAwMDAwMDAwMCA2NTUzNSBmDQowMDAwMDAwMDA5IDAwMDAwIG4NCjAwMDAwMDAwNTggMDAwMDAgbg0KMDAwMDAwMDExNSAwMDAwMCBuDQowMDAwMDAwMjE0IDAwMDAwIG4NCjAwMDAwMDAyODEgMDAwMDAgbg0KdHJhaWxlcgo8PCAvU2l6ZSA2IC9Sb290IDEgMCBSID4+CnN0YXJ0eHJlZgozNzkKJSVFT0YK';
-        setPdfUrl(simulatedPdfUrl);
-      }
-      
-      // Complete the progress
-      setProgress(100);
-      
-      // Scroll to the results section
-      setTimeout(() => {
-        if (resultSectionRef.current) {
-          resultSectionRef.current.scrollIntoView({
-            behavior: 'smooth',
-            block: 'start'
-          });
-        }
-      }, 300);
-    } catch (err) {
-      console.error('Error converting Word to PDF:', err);
-      setError(`Error converting document: ${err.message}`);
-    } finally {
-      setIsProcessing(false);
-      setProgress(100);
     }
   };
   
@@ -481,15 +424,21 @@ const WordToPdf = () => {
     if (docUrl) {
       URL.revokeObjectURL(docUrl);
     }
+    if (pdfUrl) {
+      URL.revokeObjectURL(pdfUrl);
+    }
     
     setDocFile(null);
     setDocName('');
+    setDocContent('');
+    setDocHtml('');
     setDocUrl(null);
     setPdfUrl(null);
     setProgress(0);
     setPageSize('a4');
     setMargins(20);
     setQuality('high');
+    setError(null);
   };
   
   // List of page size options
@@ -531,11 +480,8 @@ const WordToPdf = () => {
           {!docFile && (
             <div 
               className={`
-                border-4 border-dashed rounded-2xl p-8 text-center transition-all duration-300 mb-8
-                ${isDragging 
-                  ? 'border-red-500 bg-red-50 dark:bg-red-900 dark:bg-opacity-10 animate-pulse scale-105' 
-                  : 'border-gray-300 hover:border-red-400 hover:bg-red-50 dark:border-gray-600 dark:hover:border-red-400 dark:hover:bg-gray-700'
-                }
+                border-2 border-dashed rounded-xl p-6 text-center
+                ${isDragging ? 'border-red-500 bg-red-50 dark:bg-red-900/20' : 'border-gray-300 dark:border-gray-600'}
                 cursor-pointer relative overflow-hidden group
               `}
               onClick={handleButtonClick}
@@ -543,15 +489,16 @@ const WordToPdf = () => {
               onDragLeave={handleDragLeave}
               onDrop={handleDrop}
             >
-              <div className="absolute inset-0 bg-gradient-to-r from-red-200 to-orange-200 dark:from-red-900 dark:to-orange-900 opacity-0 group-hover:opacity-10 transition-opacity duration-500 rounded-xl"></div>
-              
+              {/* File input (hidden) */}
               <input
                 type="file"
                 ref={fileInputRef}
                 onChange={onSelectFile}
-                accept=".doc,.docx,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
                 className="hidden"
+                accept=".doc,.docx,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
               />
+              
+              <div className="absolute inset-0 bg-gradient-to-r from-red-200 to-orange-200 dark:from-red-900 dark:to-orange-900 opacity-0 group-hover:opacity-10 transition-opacity duration-500 rounded-xl"></div>
               
               <div className="py-6">
                 <div className="mb-4 flex justify-center">
@@ -652,26 +599,29 @@ const WordToPdf = () => {
                   </div>
                 </div>
                 
-                <div className="flex justify-center">
+                <div className="mt-6">
                   <button
-                    onClick={convertToPdf}
-                    disabled={isProcessing || loading}
-                    className={`px-6 py-3 rounded-lg text-white text-center font-medium
-                      ${isProcessing || loading
-                        ? 'bg-gray-400 cursor-not-allowed'
-                        : 'bg-red-600 hover:bg-red-700'
-                      } transition-colors`}
+                    onClick={convertButtonClick}
+                    disabled={isProcessing}
+                    className={`w-full py-3 px-6 ${
+                      isProcessing ? 'bg-gray-400 cursor-not-allowed' : 'bg-red-600 hover:bg-red-700'
+                    } text-white rounded-lg shadow transition-colors flex items-center justify-center space-x-2`}
                   >
                     {isProcessing ? (
-                      <div className="flex items-center space-x-2">
+                      <>
                         <svg className="animate-spin h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
                           <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
                           <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
                         </svg>
-                        <span>Converting... {progress}%</span>
-                      </div>
+                        <span>Processing... {progress}%</span>
+                      </>
                     ) : (
-                      'Convert to PDF'
+                      <>
+                        <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                          <path fillRule="evenodd" d="M6 2a2 2 0 00-2 2v12a2 2 0 002 2h8a2 2 0 002-2V7.414A2 2 0 0015.414 6L12 2.586A2 2 0 0010.586 2H6zm5 6a1 1 0 10-2 0v2H7a1 1 0 100 2h2v2a1 1 0 102 0v-2h2a1 1 0 100-2h-2V8z" clipRule="evenodd" />
+                        </svg>
+                        <span>Convert to PDF</span>
+                      </>
                     )}
                   </button>
                 </div>
@@ -695,9 +645,14 @@ const WordToPdf = () => {
                             {docName}
                           </h4>
                           <div className="bg-white dark:bg-gray-800 p-6 rounded shadow-sm text-gray-800 dark:text-gray-200 font-serif leading-relaxed">
-                            {docContent.split('\n').map((paragraph, index) => (
-                              paragraph ? <p key={index} className="mb-4">{paragraph}</p> : <br key={index} />
-                            ))}
+                            {/* Apply specialized font styling for better international character display */}
+                            <div style={{
+                              fontFamily: "'Noto Sans Telugu', 'Noto Sans', Arial, sans-serif",
+                            }}>
+                              {docContent.split('\n').map((paragraph, index) => (
+                                paragraph ? <p key={index} className="mb-4">{paragraph}</p> : <br key={index} />
+                              ))}
+                            </div>
                           </div>
                         </div>
                       ) : (

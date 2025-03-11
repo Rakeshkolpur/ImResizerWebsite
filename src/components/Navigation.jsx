@@ -54,6 +54,7 @@ const Navigation = ({ darkMode, toggleDarkMode, onToolSelect }) => {
   <div className="w-full lg:w-auto px-4 py-2 text-sm font-medium lg:bg-gray-800 text-gray-500 dark:text-gray-400 border-t lg:border-t-0 lg:border-l border-gray-100 dark:border-gray-700">
     PDF Tools
     <a href="#" onClick={(e) => { e.preventDefault(); handleTabChange('extract_text'); }} className="block px-4 py-2 text-sm text-gray-700 dark:text-gray-200 hover:bg-purple-50 dark:hover:bg-gray-700 cursor-pointer">Extract Text</a>
+    <a href="#" onClick={(e) => { e.preventDefault(); handleTabChange('pdf-compressor'); }} className="block px-4 py-2 text-sm text-gray-700 dark:text-gray-200 hover:bg-purple-50 dark:hover:bg-gray-700 cursor-pointer">PDF Compressor</a>
   </div>
 
   <div className="w-full lg:w-auto px-4 py-2 text-sm font-medium lg:bg-gray-800 text-gray-500 dark:text-gray-400 border-t lg:border-t-0 lg:border-l border-gray-100 dark:border-gray-700">
@@ -70,6 +71,13 @@ const Navigation = ({ darkMode, toggleDarkMode, onToolSelect }) => {
             <a href="#" onClick={(e) => { e.preventDefault(); handleTabChange('compress_image'); }} className="block px-4 py-2 text-sm text-gray-700 dark:text-gray-200 hover:bg-purple-50 dark:hover:bg-gray-700 cursor-pointer">Compress Image</a>
             <a href="#" onClick={(e) => { e.preventDefault(); handleTabChange('crop_image'); }} className="block px-4 py-2 text-sm text-gray-700 dark:text-gray-200 hover:bg-purple-50 dark:hover:bg-gray-700 cursor-pointer">Crop Image</a>
             <a href="#" onClick={(e) => { e.preventDefault(); handleTabChange('convert_image'); }} className="block px-4 py-2 text-sm text-gray-700 dark:text-gray-200 hover:bg-purple-50 dark:hover:bg-gray-700 cursor-pointer">Convert Image Format</a>
+          </div>
+        );
+      case 'pdf-tools':
+        return (
+          <div className="absolute top-full left-0 mt-1 w-60 bg-white dark:bg-gray-800 shadow-lg rounded-lg py-2 z-10">
+            <a href="#" onClick={(e) => { e.preventDefault(); handleTabChange('extract_text'); }} className="block px-4 py-2 text-sm text-gray-700 dark:text-gray-200 hover:bg-purple-50 dark:hover:bg-gray-700 cursor-pointer">Extract Text</a>
+            <a href="#" onClick={(e) => { e.preventDefault(); handleTabChange('pdf-compressor'); }} className="block px-4 py-2 text-sm text-gray-700 dark:text-gray-200 hover:bg-purple-50 dark:hover:bg-gray-700 cursor-pointer">PDF Compressor</a>
           </div>
         );
       case 'converter':
@@ -133,20 +141,42 @@ const Navigation = ({ darkMode, toggleDarkMode, onToolSelect }) => {
               </div>
               
               <div className="relative" onMouseEnter={() => handleMouseEnter('imresize')} onMouseLeave={handleMouseLeave}>
-                <button 
+                <button
                   onClick={() => handleTabChange('imresize')}
                   className={`px-3 py-2 rounded-md text-sm font-medium cursor-pointer ${
-                    activeTab === 'imresize' 
-                      ? 'text-purple-600 dark:text-purple-400' 
+                    activeTab === 'imresize'
+                      ? 'text-purple-600 dark:text-purple-400'
                       : 'text-gray-700 hover:text-purple-600 dark:text-gray-200 dark:hover:text-purple-400'
                   }`}
                 >
-                  ImResize
+                  Image Tools
                   <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 inline-block ml-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
                   </svg>
                 </button>
                 {showDropdown === 'imresize' && getDropdownContent('imresize')}
+              </div>
+
+              <div className="relative" onMouseEnter={() => handleMouseEnter('pdf-tools')} onMouseLeave={handleMouseLeave}>
+                <button
+                  onClick={() => handleTabChange('pdf-tools')}
+                  className={`px-3 py-2 rounded-md text-sm font-medium cursor-pointer ${
+                    activeTab === 'pdf-tools'
+                      ? 'text-purple-600 dark:text-purple-400'
+                      : 'text-gray-700 hover:text-purple-600 dark:text-gray-200 dark:hover:text-purple-400'
+                  }`}
+                >
+                  PDF Tools
+                  <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 inline-block ml-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                  </svg>
+                </button>
+                {showDropdown === 'pdf-tools' && (
+                  <div className="absolute top-full left-0 mt-1 w-60 bg-white dark:bg-gray-800 shadow-lg rounded-lg py-2 z-10">
+                    <a href="#" onClick={(e) => { e.preventDefault(); handleTabChange('extract_text'); }} className="block px-4 py-2 text-sm text-gray-700 dark:text-gray-200 hover:bg-purple-50 dark:hover:bg-gray-700 cursor-pointer">Extract Text</a>
+                    <a href="#" onClick={(e) => { e.preventDefault(); handleTabChange('pdf-compressor'); }} className="block px-4 py-2 text-sm text-gray-700 dark:text-gray-200 hover:bg-purple-50 dark:hover:bg-gray-700 cursor-pointer">PDF Compressor</a>
+                  </div>
+                )}
               </div>
               
               <div className="relative" onMouseEnter={() => handleMouseEnter('converter')} onMouseLeave={handleMouseLeave}>
@@ -215,55 +245,57 @@ const Navigation = ({ darkMode, toggleDarkMode, onToolSelect }) => {
         </div>
 
         {/* Mobile menu */}
-        <div className={`${isMenuOpen ? 'block' : 'hidden'} md:hidden`}>
-          <div className="px-2 pt-2 pb-3 space-y-1 sm:px-3">
-            <button 
-              onClick={() => handleTabChange('home')}
-              className="w-full block px-3 py-2 rounded-md text-base font-medium text-left text-gray-700 hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-gray-700 cursor-pointer"
-            >
-              Home
-            </button>
-            <button 
-              onClick={() => handleTabChange('all-tools')}
-              className={`w-full block px-3 py-2 rounded-md text-base font-medium text-left  cursor-pointer ${
-                activeTab === 'all-tools' 
-                  ? 'bg-purple-100 text-purple-700 dark:bg-purple-900 dark:text-purple-200' 
-                  : 'text-gray-700 hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-gray-700'
-              }`}
-            >
-              All Tools
-            </button>
-            <button 
-              onClick={() => handleTabChange('imresize')}
-              className={`w-full block px-3 py-2 rounded-md text-base font-medium text-left cursor-pointer ${
-                activeTab === 'imresize' 
-                  ? 'bg-purple-100 text-purple-700 dark:bg-purple-900 dark:text-purple-200' 
-                  : 'text-gray-700 hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-gray-700'
-              }`}
-            >
-              ImResize
-            </button>
-            <button 
-              onClick={() => handleTabChange('converter')}
-              className={`w-full block px-3 py-2 rounded-md text-base font-medium text-left cursor-pointer ${
-                activeTab === 'converter' 
-                  ? 'bg-purple-100 text-purple-700 dark:bg-purple-900 dark:text-purple-200' 
-                  : 'text-gray-700 hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-gray-700'
-              }`}
-            >
-              Converter
-            </button>
-            <button 
-              onClick={() => handleTabChange('about')}
-              className={`w-full block px-3 py-2 rounded-md text-base font-medium text-left cursor-pointer ${
-                activeTab === 'about' 
-                  ? 'bg-purple-100 text-purple-700 dark:bg-purple-900 dark:text-purple-200' 
-                  : 'text-gray-700 hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-gray-700'
-              }`}
-            >
-              About
-            </button>
-          </div>
+        <div className={`${isMenuOpen ? 'block' : 'hidden'} md:hidden bg-white dark:bg-gray-800 pt-2 pb-3 space-y-1 border-t border-gray-200 dark:border-gray-700`}>
+          <button 
+            onClick={() => handleTabChange('home')}
+            className={`w-full block px-3 py-2 rounded-md text-base font-medium text-left cursor-pointer ${
+              !activeTab 
+                ? 'bg-purple-100 text-purple-700 dark:bg-purple-900 dark:text-purple-200' 
+                : 'text-gray-700 hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-gray-700'
+            }`}
+          >
+            Home
+          </button>
+          <button 
+            onClick={() => handleTabChange('imresize')}
+            className={`w-full block px-3 py-2 rounded-md text-base font-medium text-left cursor-pointer ${
+              activeTab === 'imresize' 
+                ? 'bg-purple-100 text-purple-700 dark:bg-purple-900 dark:text-purple-200' 
+                : 'text-gray-700 hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-gray-700'
+            }`}
+          >
+            Image Tools
+          </button>
+          <button 
+            onClick={() => handleTabChange('pdf-tools')}
+            className={`w-full block px-3 py-2 rounded-md text-base font-medium text-left cursor-pointer ${
+              activeTab === 'pdf-tools' 
+                ? 'bg-purple-100 text-purple-700 dark:bg-purple-900 dark:text-purple-200' 
+                : 'text-gray-700 hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-gray-700'
+            }`}
+          >
+            PDF Tools
+          </button>
+          <button 
+            onClick={() => handleTabChange('converter')}
+            className={`w-full block px-3 py-2 rounded-md text-base font-medium text-left cursor-pointer ${
+              activeTab === 'converter' 
+                ? 'bg-purple-100 text-purple-700 dark:bg-purple-900 dark:text-purple-200' 
+                : 'text-gray-700 hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-gray-700'
+            }`}
+          >
+            Converters
+          </button>
+          <button 
+            onClick={() => handleTabChange('all-tools')}
+            className={`w-full block px-3 py-2 rounded-md text-base font-medium text-left cursor-pointer ${
+              activeTab === 'all-tools' 
+                ? 'bg-purple-100 text-purple-700 dark:bg-purple-900 dark:text-purple-200' 
+                : 'text-gray-700 hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-gray-700'
+            }`}
+          >
+            All Tools
+          </button>
         </div>
       </div>
     </nav>
