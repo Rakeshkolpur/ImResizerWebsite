@@ -13,6 +13,7 @@ const PdfToJpg = React.lazy(() => import('./tools/conversion/PdfToJpg'));
 const ExtractText = React.lazy(() => import('./tools/pdf/ExtractText'));
 const PDFEditor = React.lazy(() => import('./tools/pdf/PDFEditor'));
 const PDFCompress = React.lazy(() => import('./tools/pdf/PDFCompress'));
+const PDFCompressor = React.lazy(() => import('./tools/pdf/PDFCompressor'));
 const PDFDeletePages = React.lazy(() => import('./tools/pdf/PDFDeletePages'));
 const PDFMerge = React.lazy(() => import('./tools/pdf/PDFMerge'));
 const PDFSplit = React.lazy(() => import('./tools/pdf/PDFSplit'));
@@ -59,17 +60,19 @@ const ToolWrapper = ({ toolId, onBack }) => {
         return <PdfToJpg />;
       case 'extract_text':
         return <ExtractText />;
+      case 'pdf-compressor':
+        return <PDFCompressor />;
       case 'compress':
         return <PDFCompress />;
       case 'delete_pages':
         return <PDFDeletePages />;
-      case 'merge':
+      case 'merge_pdf':
         return <PDFMerge />;
-      case 'split':
+      case 'split_pdf':
         return <PDFSplit />;
-      case 'fill_sign':
+      case 'pdf_fill_sign':
         return <PDFFillAndSign />;
-      case 'organize':
+      case 'pdf_organize':
         return <PDFOrganize />;
       default:
         // If the tool component is not yet implemented, show a message

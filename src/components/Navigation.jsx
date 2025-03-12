@@ -1,18 +1,33 @@
 import React, { useState, useEffect } from 'react';
+import styles from './Navigation.module.css';
 
 const Navigation = ({ darkMode, toggleDarkMode, onToolSelect }) => {
   const [activeTab, setActiveTab] = useState('imresize');
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [showDropdown, setShowDropdown] = useState(null);
+  const [scrolled, setScrolled] = useState(false);
+  const [lastScrollY, setLastScrollY] = useState(0);
+  const [scrollDirection, setScrollDirection] = useState('down');
 
   const handleTabChange = (tab) => {
     setActiveTab(tab);
     setIsMenuOpen(false);
     setShowDropdown(null);
-    
+
     // Pass the selected tool to the App component
     if (onToolSelect) {
-      onToolSelect(tab);
+      // Special handling for category headers
+      if (tab === 'all-tools') {
+        onToolSelect('category-all-tools');
+      } else if (tab === 'pdf-tools') {
+        onToolSelect('category-pdf-tools');
+      } else if (tab === 'imresize') {
+        onToolSelect('category-image-tools');
+      } else if (tab === 'converter') {
+        onToolSelect('category-converters');
+      } else {
+        onToolSelect(tab);
+      }
     }
   };
 
@@ -36,6 +51,34 @@ const Navigation = ({ darkMode, toggleDarkMode, onToolSelect }) => {
       document.removeEventListener('click', handleClickOutside);
     };
   }, []);
+
+  // Handle scroll event for sticky navbar
+  useEffect(() => {
+    const handleScroll = () => {
+      const currentScrollY = window.scrollY;
+      
+      // Determine if we've scrolled more than 50px
+      if (currentScrollY > 50) {
+        setScrolled(true);
+      } else {
+        setScrolled(false);
+      }
+      
+      // Determine scroll direction
+      if (currentScrollY > lastScrollY) {
+        setScrollDirection('down');
+      } else {
+        setScrollDirection('up');
+      }
+      
+      setLastScrollY(currentScrollY);
+    };
+
+    window.addEventListener('scroll', handleScroll, { passive: true });
+    return () => {
+      window.removeEventListener('scroll', handleScroll);
+    };
+  }, [lastScrollY]);
 
   // Get dropdown content based on tab
   const getDropdownContent = (tab) => {
@@ -95,8 +138,17 @@ const Navigation = ({ darkMode, toggleDarkMode, onToolSelect }) => {
     }
   };
 
+  // Navbar classes based on scroll state
+  const navbarClasses = `
+    ${scrolled ? styles.navbarScrolled : ''} 
+    ${scrollDirection === 'up' ? styles.navbarSticky : ''}
+    ${darkMode && scrolled ? styles.dark : ''}
+    border-b border-gray-200 dark:border-gray-700 transition-all duration-300
+    ${!scrolled ? 'bg-white dark:bg-gray-800' : ''}
+  `;
+
   return (
-    <nav className="bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 shadow-sm">
+    <nav className={navbarClasses}>
       <div className="container mx-auto px-4">
         <div className="flex justify-between items-center h-16">
           {/* Logo */}
@@ -116,19 +168,27 @@ const Navigation = ({ darkMode, toggleDarkMode, onToolSelect }) => {
           {/* Desktop Navigation */}
           <div className="hidden md:flex">
             <div className="ml-10 flex items-center space-x-4">
-              <button 
+              <button
                 onClick={() => handleTabChange('home')}
-                className="px-3 py-2 rounded-md text-sm font-medium text-gray-700 hover:text-purple-600 dark:text-gray-200 dark:hover:text-purple-400 cursor-pointer"
+                className={`${styles.navItem} ${scrollDirection === 'up' ? styles.navItemHover : ''} px-3 py-2 rounded-md text-sm font-medium cursor-pointer ${
+                  !activeTab
+                    ? 'text-purple-600 dark:text-purple-400'
+                    : 'text-gray-700 hover:text-purple-600 dark:text-gray-200 dark:hover:text-purple-400'
+                }`}
               >
                 Home
               </button>
-              
-              <div className="relative" onMouseEnter={() => handleMouseEnter('all-tools')} onMouseLeave={handleMouseLeave}>
-                <button 
+
+              <div 
+                className={`relative ${styles.navItem} ${scrollDirection === 'up' ? styles.navItemHover : ''}`} 
+                onMouseEnter={() => handleMouseEnter('all-tools')} 
+                onMouseLeave={handleMouseLeave}
+              >
+                <button
                   onClick={() => handleTabChange('all-tools')}
                   className={`px-3 py-2 rounded-md text-sm font-medium cursor-pointer ${
-                    activeTab === 'all-tools' 
-                      ? 'text-purple-600 dark:text-purple-400' 
+                    activeTab === 'all-tools'
+                      ? 'text-purple-600 dark:text-purple-400'
                       : 'text-gray-700 hover:text-purple-600 dark:text-gray-200 dark:hover:text-purple-400'
                   }`}
                 >
@@ -137,10 +197,18 @@ const Navigation = ({ darkMode, toggleDarkMode, onToolSelect }) => {
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
                   </svg>
                 </button>
-                {showDropdown === 'all-tools' && getDropdownContent('all-tools')}
+                {showDropdown === 'all-tools' && (
+                  <div className={styles.fadeIn}>
+                    {getDropdownContent('all-tools')}
+                  </div>
+                )}
               </div>
-              
-              <div className="relative" onMouseEnter={() => handleMouseEnter('imresize')} onMouseLeave={handleMouseLeave}>
+
+              <div 
+                className={`relative ${styles.navItem} ${scrollDirection === 'up' ? styles.navItemHover : ''}`} 
+                onMouseEnter={() => handleMouseEnter('imresize')} 
+                onMouseLeave={handleMouseLeave}
+              >
                 <button
                   onClick={() => handleTabChange('imresize')}
                   className={`px-3 py-2 rounded-md text-sm font-medium cursor-pointer ${
@@ -154,10 +222,18 @@ const Navigation = ({ darkMode, toggleDarkMode, onToolSelect }) => {
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
                   </svg>
                 </button>
-                {showDropdown === 'imresize' && getDropdownContent('imresize')}
+                {showDropdown === 'imresize' && (
+                  <div className={styles.fadeIn}>
+                    {getDropdownContent('imresize')}
+                  </div>
+                )}
               </div>
 
-              <div className="relative" onMouseEnter={() => handleMouseEnter('pdf-tools')} onMouseLeave={handleMouseLeave}>
+              <div 
+                className={`relative ${styles.navItem} ${scrollDirection === 'up' ? styles.navItemHover : ''}`} 
+                onMouseEnter={() => handleMouseEnter('pdf-tools')} 
+                onMouseLeave={handleMouseLeave}
+              >
                 <button
                   onClick={() => handleTabChange('pdf-tools')}
                   className={`px-3 py-2 rounded-md text-sm font-medium cursor-pointer ${
@@ -172,9 +248,11 @@ const Navigation = ({ darkMode, toggleDarkMode, onToolSelect }) => {
                   </svg>
                 </button>
                 {showDropdown === 'pdf-tools' && (
-                  <div className="absolute top-full left-0 mt-1 w-60 bg-white dark:bg-gray-800 shadow-lg rounded-lg py-2 z-10">
-                    <a href="#" onClick={(e) => { e.preventDefault(); handleTabChange('extract_text'); }} className="block px-4 py-2 text-sm text-gray-700 dark:text-gray-200 hover:bg-purple-50 dark:hover:bg-gray-700 cursor-pointer">Extract Text</a>
-                    <a href="#" onClick={(e) => { e.preventDefault(); handleTabChange('pdf-compressor'); }} className="block px-4 py-2 text-sm text-gray-700 dark:text-gray-200 hover:bg-purple-50 dark:hover:bg-gray-700 cursor-pointer">PDF Compressor</a>
+                  <div className={styles.fadeIn}>
+                    <div className="absolute top-full left-0 mt-1 w-60 bg-white dark:bg-gray-800 shadow-lg rounded-lg py-2 z-10">
+                      <a href="#" onClick={(e) => { e.preventDefault(); handleTabChange('extract_text'); }} className="block px-4 py-2 text-sm text-gray-700 dark:text-gray-200 hover:bg-purple-50 dark:hover:bg-gray-700 cursor-pointer">Extract Text</a>
+                      <a href="#" onClick={(e) => { e.preventDefault(); handleTabChange('pdf-compressor'); }} className="block px-4 py-2 text-sm text-gray-700 dark:text-gray-200 hover:bg-purple-50 dark:hover:bg-gray-700 cursor-pointer">PDF Compressor</a>
+                    </div>
                   </div>
                 )}
               </div>
@@ -195,49 +273,48 @@ const Navigation = ({ darkMode, toggleDarkMode, onToolSelect }) => {
                 </button>
                 {showDropdown === 'converter' && getDropdownContent('converter')}
               </div>
-              
-              <button 
-                onClick={() => handleTabChange('about')}
-                className={`px-3 py-2 rounded-md text-sm font-medium cursor-pointer ${
-                  activeTab === 'about' 
-                    ? 'text-purple-600 dark:text-purple-400' 
-                    : 'text-gray-700 hover:text-purple-600 dark:text-gray-200 dark:hover:text-purple-400'
-                }`}
-              >
-                About
-              </button>
             </div>
           </div>
 
-          {/* Dark Mode Toggle */}
+          {/* Dark mode toggle and mobile menu button */}
           <div className="flex items-center">
-            <button 
+            {/* Dark mode toggle button */}
+            <button
               onClick={toggleDarkMode}
-              className="p-2 rounded-lg bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-200 focus:outline-none hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors cursor-pointer"
-              aria-label={darkMode ? "Switch to light mode" : "Switch to dark mode"}
+              className={`p-2 rounded-md text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-white focus:outline-none ${styles.navItem} ${scrollDirection === 'up' ? styles.navItemHover : ''}`}
             >
               {darkMode ? (
-                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
-                  <path fillRule="evenodd" d="M10 2a1 1 0 011 1v1a1 1 0 11-2 0V3a1 1 0 011-1zm4 8a4 4 0 11-8 0 4 4 0 018 0zm-.464 4.95l.707.707a1 1 0 001.414-1.414l-.707-.707a1 1 0 00-1.414 1.414zm2.12-10.607a1 1 0 010 1.414l-.706.707a1 1 0 11-1.414-1.414l.707-.707a1 1 0 011.414 0zM17 11a1 1 0 100-2h-1a1 1 0 100 2h1zm-7 4a1 1 0 011 1v1a1 1 0 11-2 0v-1a1 1 0 011-1zM5.05 6.464A1 1 0 106.465 5.05l-.708-.707a1 1 0 00-1.414 1.414l.707.707zm1.414 8.486l-.707.707a1 1 0 01-1.414-1.414l.707-.707a1 1 0 011.414 1.414zM4 11a1 1 0 100-2H3a1 1 0 000 2h1z" clipRule="evenodd" />
+                <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth="2"
+                    d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z"
+                  />
                 </svg>
               ) : (
-                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
-                  <path d="M17.293 13.293A8 8 0 016.707 2.707a8.001 8.001 0 1010.586 10.586z" />
+                <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth="2"
+                    d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z"
+                  />
                 </svg>
               )}
             </button>
 
             {/* Mobile menu button */}
-            <div className="ml-4 md:hidden">
-              <button 
+            <div className="md:hidden ml-4">
+              <button
                 onClick={() => setIsMenuOpen(!isMenuOpen)}
-                className="bg-gray-100 dark:bg-gray-700 inline-flex items-center justify-center p-2 rounded-md text-gray-700 dark:text-gray-200 hover:bg-gray-200 dark:hover:bg-gray-600 focus:outline-none cursor-pointer"
+                className="inline-flex items-center justify-center p-2 rounded-md text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-white hover:bg-gray-100 dark:hover:bg-gray-700 focus:outline-none"
               >
-                <svg className={`${isMenuOpen ? 'hidden' : 'block'} h-6 w-6`} xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
+                <svg className={`${isMenuOpen ? 'hidden' : 'block'} h-6 w-6`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 6h16M4 12h16M4 18h16" />
                 </svg>
-                <svg className={`${isMenuOpen ? 'block' : 'hidden'} h-6 w-6`} xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                <svg className={`${isMenuOpen ? 'block' : 'hidden'} h-6 w-6`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" />
                 </svg>
               </button>
             </div>
@@ -245,7 +322,7 @@ const Navigation = ({ darkMode, toggleDarkMode, onToolSelect }) => {
         </div>
 
         {/* Mobile menu */}
-        <div className={`${isMenuOpen ? 'block' : 'hidden'} md:hidden bg-white dark:bg-gray-800 pt-2 pb-3 space-y-1 border-t border-gray-200 dark:border-gray-700`}>
+        <div className={`${isMenuOpen ? styles.scaleIn : 'hidden'} md:hidden bg-white dark:bg-gray-800 pt-2 pb-3 space-y-1 border-t border-gray-200 dark:border-gray-700`}>
           <button 
             onClick={() => handleTabChange('home')}
             className={`w-full block px-3 py-2 rounded-md text-base font-medium text-left cursor-pointer ${

@@ -150,6 +150,14 @@ export const toolGroups = [
         icon: <OrganizeIcon />,
         category: 'pdf'
       },
+      {
+        id: 'pdf-compressor',
+        title: 'PDF Compressor',
+        description: 'Reduce the size of your PDF files with precise control over compression settings',
+        icon: <CompressIcon />,
+        category: 'pdf',
+        component: 'PDFCompressor'
+      },
     ]
   },
   {

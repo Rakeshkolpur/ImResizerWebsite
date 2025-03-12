@@ -3,39 +3,54 @@
   flex-direction: column;
   height: 100vh;
   background-color: #f0f0f0;
+  overflow: hidden;
 }
 
 .toolbar {
   background-color: #333;
   padding: 0.5rem;
   box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  height: 64px;
+  display: flex;
+  align-items: center;
 }
 
 .toolbarContent {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  flex-wrap: wrap;
-  gap: 1rem;
+  flex-wrap: nowrap;
+  gap: 0.5rem;
+  width: 100%;
+  overflow-x: auto;
+  scrollbar-width: none; /* Hide scrollbar for Firefox */
+}
+
+.toolbarContent::-webkit-scrollbar {
+  display: none; /* Hide scrollbar for Chrome/Safari */
 }
 
 .toolGroup {
   display: flex;
   align-items: center;
-  gap: 0.5rem;
+  gap: 0.25rem;
+  flex-shrink: 0;
+  margin-right: 0.5rem;
 }
 
 .button {
   background-color: #4a5568;
   color: white;
   border: none;
-  padding: 0.5rem 1rem;
+  padding: 0.5rem 0.75rem;
   border-radius: 0.25rem;
   cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
   font-size: 0.875rem;
+  white-space: nowrap;
+  height: 2.5rem;
 }
 
 .button:hover {
@@ -58,6 +73,8 @@
   display: flex;
   align-items: center;
   justify-content: center;
+  padding: 0;
+  flex-shrink: 0;
 }
 
 .toolButton:hover {
@@ -73,6 +90,8 @@
   display: flex;
   flex: 1;
   overflow: hidden;
+  position: relative;
+  height: calc(100vh - 64px); /* Adjust for toolbar height */
 }
 
 .sidebar {
@@ -81,6 +100,18 @@
   color: white;
   padding: 1rem;
   overflow-y: auto;
+  transition: width 0.3s ease;
+  flex-shrink: 0;
+}
+
+.sidebarVisible {
+  width: 250px;
+}
+
+.sidebarHidden {
+  width: 0;
+  padding: 0;
+  overflow: hidden;
 }
 
 .sidebarSection {
@@ -105,14 +136,79 @@
   border-radius: 0.25rem;
 }
 
+/* New styles for text editing controls */
+.label {
+  display: block;
+  margin-bottom: 0.25rem;
+  font-size: 0.875rem;
+  color: #e2e8f0;
+}
+
+.controlGroup {
+  margin-bottom: 1rem;
+}
+
+.colorInput {
+  width: 100%;
+  height: 2.5rem;
+  padding: 0.25rem;
+  background-color: #4a5568;
+  border: none;
+  border-radius: 0.25rem;
+  cursor: pointer;
+}
+
+.colorInputWrapper {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.smallButton {
+  background-color: #4a5568;
+  color: white;
+  border: none;
+  padding: 0.375rem 0.75rem;
+  border-radius: 0.25rem;
+  cursor: pointer;
+  font-size: 0.75rem;
+  white-space: nowrap;
+}
+
+.smallButton:hover {
+  background-color: #2d3748;
+}
+
 .canvasContainer {
   flex: 1;
-  overflow: auto;
+  overflow: auto !important; /* Force scrollbars when needed */
   background-color: #718096;
   display: flex;
   justify-content: center;
-  align-items: center;
-  padding: 2rem;
+  align-items: flex-start; /* Keep content aligned to the top */
+  padding: 0.25rem; /* Reduce padding to use more space */
+  padding-top: 0.5rem; /* Reduce top padding */
+  height: calc(100vh - 64px);
+  box-sizing: border-box;
+  /* Add scrollbar styling */
+  scrollbar-width: thin;
+  scrollbar-color: #4a5568 #718096;
+}
+
+/* Style scrollbars for webkit browsers */
+.canvasContainer::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+.canvasContainer::-webkit-scrollbar-track {
+  background: #718096;
+}
+
+.canvasContainer::-webkit-scrollbar-thumb {
+  background-color: #4a5568;
+  border-radius: 6px;
+  border: 2px solid #718096;
 }
 
 .canvasWrapper {
@@ -120,18 +216,53 @@
   box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
   background-color: white;
   margin: 0 auto;
+  margin-top: 0.25rem;
   display: inline-block;
+  overflow: visible;
+  user-select: none;
+  border-radius: 4px;
 }
 
 .pdfCanvas {
   display: block;
+  width: 100%;
+  height: auto;
+  image-rendering: -webkit-optimize-contrast;
+  image-rendering: crisp-edges;
+  -ms-interpolation-mode: nearest-neighbor;
+  transform: translateZ(0);
+  backface-visibility: hidden;
+  will-change: transform;
+  filter: contrast(1.05);
 }
 
 .overlayCanvas {
   position: absolute !important;
   top: 0 !important;
   left: 0 !important;
+  z-index: 2;
   pointer-events: auto;
+  transform: none !important;
+  width: 100% !important;
+  height: 100% !important;
+  transform-origin: 0 0 !important;
+}
+
+/* Style to force Fabric.js not to add its own scaling */
+:global(.canvas-container) {
+  position: absolute !important;
+  top: 0 !important;
+  left: 0 !important;
+  width: 100% !important;
+  height: 100% !important;
+  transform: none !important;
+}
+
+:global(.upper-canvas), :global(.lower-canvas) {
+  position: absolute !important;
+  top: 0 !important;
+  left: 0 !important;
+  user-select: none;
 }
 
 .pdfImageFallback {
@@ -218,4 +349,390 @@
 
 .errorButton:hover {
   background-color: #c53030;
+}
+
+.fabricWrapper {
+  position: absolute !important;
+  top: 0 !important;
+  left: 0 !important;
+  width: 100% !important;
+  height: 100% !important;
+  transform: none !important;
+  transform-origin: 0 0 !important;
+  pointer-events: auto;
+}
+
+/* Shape styles */
+.shapeGrid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0.5rem;
+  margin-top: 1rem;
+  margin-bottom: 1rem;
+}
+
+.shapeButton {
+  background-color: #4a5568;
+  color: white;
+  border: none;
+  width: 100%;
+  aspect-ratio: 1/1;
+  border-radius: 0.25rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  font-size: 1.25rem;
+  position: relative;
+  transition: all 0.2s ease;
+}
+
+.shapeButton:hover {
+  background-color: #2d3748;
+  transform: translateY(-2px);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+}
+
+.shapeButton:active {
+  transform: translateY(0);
+  box-shadow: none;
+}
+
+.triangleIcon {
+  width: 0;
+  height: 0;
+  border-left: 12px solid transparent;
+  border-right: 12px solid transparent;
+  border-bottom: 24px solid white;
+}
+
+.lineIcon {
+  width: 24px;
+  height: 2px;
+  background-color: white;
+}
+
+.colorOptions {
+  margin-top: 1rem;
+}
+
+.controlLabel {
+  display: block;
+  margin-bottom: 0.25rem;
+}
+
+.controlLabelWithToggle {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.25rem;
+}
+
+.rangeInput {
+  width: 100%;
+  background-color: #4a5568;
+  border-radius: 0.25rem;
+  margin-bottom: 0.25rem;
+}
+
+.valueDisplay {
+  display: inline-block;
+  font-size: 0.75rem;
+  color: #e2e8f0;
+}
+
+.applyContainer {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 0.5rem;
+  margin-top: 1rem;
+}
+
+.applyButton {
+  background-color: #4a5568;
+  color: white;
+  border: none;
+  padding: 0.5rem;
+  border-radius: 0.25rem;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.75rem;
+  transition: background-color 0.2s ease;
+}
+
+.applyButton:hover {
+  background-color: #2d3748;
+}
+
+.buttonIcon {
+  font-size: 1rem;
+  margin-bottom: 0.25rem;
+}
+
+/* Toggle switch styles */
+.switch {
+  position: relative;
+  display: inline-block;
+  width: 36px;
+  height: 20px;
+}
+
+.switch input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+.slider {
+  position: absolute;
+  cursor: pointer;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: #ccc;
+  transition: .4s;
+  border-radius: 34px;
+}
+
+.slider:before {
+  position: absolute;
+  content: "";
+  height: 16px;
+  width: 16px;
+  left: 2px;
+  bottom: 2px;
+  background-color: white;
+  transition: .4s;
+  border-radius: 50%;
+}
+
+input:checked + .slider {
+  background-color: #4299e1;
+}
+
+input:focus + .slider {
+  box-shadow: 0 0 1px #4299e1;
+}
+
+input:checked + .slider:before {
+  transform: translateX(16px);
+}
+
+/* Section header with toggle */
+.sectionHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.75rem;
+  border-bottom: 1px solid #4a5568;
+  padding-bottom: 0.5rem;
+}
+
+.toggleButton {
+  background: none;
+  border: none;
+  color: white;
+  cursor: pointer;
+  font-size: 0.75rem;
+  padding: 0;
+}
+
+/* Layers panel styles */
+.layersPanel {
+  background-color: #2d3748;
+  border-radius: 4px;
+  padding: 0.5rem;
+  margin-bottom: 1rem;
+}
+
+.layerControls {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 0.5rem;
+}
+
+.layerButton {
+  background-color: #4a5568;
+  color: white;
+  border: none;
+  width: 24px;
+  height: 24px;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.layerButton:hover {
+  background-color: #38a169;
+}
+
+.layersList {
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+.layerItem {
+  display: flex;
+  align-items: center;
+  padding: 0.5rem;
+  border-radius: 4px;
+  cursor: pointer;
+  margin-bottom: 0.25rem;
+  background-color: #4a5568;
+  transition: background-color 0.2s;
+}
+
+.layerItem:hover {
+  background-color: #4a5568;
+}
+
+.activeLayer {
+  background-color: #4299e1;
+}
+
+.layerVisibility {
+  margin-right: 0.5rem;
+}
+
+.layerToggle {
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  font-size: 0.875rem;
+}
+
+.layerName {
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.layerNameInput {
+  background-color: transparent;
+  border: none;
+  color: white;
+  width: 100%;
+  padding: 0.25rem;
+  font-size: 0.875rem;
+}
+
+.layerNameInput:focus {
+  background-color: rgba(255, 255, 255, 0.1);
+  outline: none;
+}
+
+.layerActions {
+  display: flex;
+  gap: 0.25rem;
+}
+
+.layerActionButton {
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  font-size: 0.875rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+}
+
+.layerActionButton:hover {
+  color: #f56565;
+}
+
+.layerActionButton:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Drawing mode styles */
+.drawingModeIndicator {
+  background-color: #4299e1;
+  border-radius: 4px;
+  padding: 0.5rem;
+  margin-bottom: 1rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  position: relative;
+}
+
+.pulsingDot {
+  width: 10px;
+  height: 10px;
+  background-color: #f56565;
+  border-radius: 50%;
+  margin-right: 0.5rem;
+  animation: pulse 1.5s infinite;
+}
+
+@keyframes pulse {
+  0% {
+    transform: scale(0.95);
+    box-shadow: 0 0 0 0 rgba(245, 101, 101, 0.7);
+  }
+  
+  70% {
+    transform: scale(1);
+    box-shadow: 0 0 0 5px rgba(245, 101, 101, 0);
+  }
+  
+  100% {
+    transform: scale(0.95);
+    box-shadow: 0 0 0 0 rgba(245, 101, 101, 0);
+  }
+}
+
+.cancelButton {
+  background-color: #f56565;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  padding: 0.25rem 0.5rem;
+  cursor: pointer;
+  font-size: 0.75rem;
+}
+
+.cancelButton:hover {
+  background-color: #e53e3e;
+}
+
+.drawingInstructions {
+  background-color: #2d3748;
+  border-radius: 4px;
+  padding: 0.5rem;
+  margin-bottom: 1rem;
+  font-size: 0.75rem;
+  color: #e2e8f0;
+  text-align: center;
+}
+
+.activeShape {
+  background-color: #4299e1 !important;
+  transform: translateY(-2px);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+}
+
+.shapeButton:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  transform: none;
+  box-shadow: none;
+}
+
+/* Style the active shape button differently */
+.shapeButton:disabled.activeShape {
+  opacity: 1;
+  background-color: #4299e1 !important;
 } 

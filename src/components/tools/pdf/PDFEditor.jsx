@@ -5,7 +5,9 @@ import * as pdfjsLib from 'pdfjs-dist';
 import { createWorker } from 'tesseract.js';
 import { FaEdit, FaImage, FaSignature, FaDrawPolygon, FaHighlighter, 
   FaFont, FaEraser, FaPenNib, FaRegComment, FaPaperclip, FaSave, 
-  FaUpload, FaUndo, FaRedo, FaSearch, FaArrowsAlt, FaStamp } from 'react-icons/fa';
+  FaUpload, FaUndo, FaRedo, FaSearch, FaArrowsAlt, FaStamp,
+  FaSquare, FaCircle, FaLongArrowAltRight, FaStar, FaRegStar, FaMapMarker,
+  FaPlus, FaHeart, FaClone, FaRegSquare, FaRegCircle, FaPalette, FaFill } from 'react-icons/fa';
 import styles from './PDFEditor.module.css';
 
 // Set the worker source to a CDN-hosted file
@@ -92,19 +94,27 @@ const PDFEditor = () => {
   const [textOptions, setTextOptions] = useState({
     font: 'Helvetica',
     size: 16,
-    color: '#000000'
+    color: '#000000',
+    backgroundColor: null,
+    fontWeight: 'normal',
+    fontStyle: 'normal'
   });
   const [drawingOptions, setDrawingOptions] = useState({
     color: '#000000',
     width: 2,
-    opacity: 1
+    opacity: 1,
+    fill: 'transparent', // Add fill property
+    fillEnabled: false // Add property to toggle fill
   });
   
   // Available fonts
   const availableFonts = [
     { name: 'Helvetica', value: 'Helvetica' },
     { name: 'Times Roman', value: 'Times-Roman' },
-    { name: 'Courier', value: 'Courier' }
+    { name: 'Courier', value: 'Courier' },
+    { name: 'Arial', value: 'Arial' },
+    { name: 'Verdana', value: 'Verdana' },
+    { name: 'Georgia', value: 'Georgia' }
   ];
   
   // Refs
@@ -156,31 +166,272 @@ const PDFEditor = () => {
   const [eraserSize, setEraserSize] = useState(20);
   const [isErasing, setIsErasing] = useState(false);
   
+  // Add state for sidebar visibility
+  const [sidebarVisible, setSidebarVisible] = useState(true);
+  
+  // Add state for layers
+  const [layers, setLayers] = useState([]);
+  const [activeLayerIndex, setActiveLayerIndex] = useState(0);
+  const [showLayers, setShowLayers] = useState(false);
+
+  // Add state for shape drawing
+  const [isDrawingShape, setIsDrawingShape] = useState(false);
+  const [currentShapeType, setCurrentShapeType] = useState(null);
+  const [drawStartPoint, setDrawStartPoint] = useState({ x: 0, y: 0 });
+  const [tempShapeObj, setTempShapeObj] = useState(null);
+
+  // Initialize with a default layer
+  useEffect(() => {
+    if (pdfDoc && layers.length === 0) {
+      setLayers([
+        { name: 'Layer 1', visible: true, locked: false, objects: [] }
+      ]);
+    }
+  }, [pdfDoc]);
+
+  // Function to add a new layer
+  const addLayer = () => {
+    setLayers(prev => [
+      ...prev,
+      { 
+        name: `Layer ${prev.length + 1}`, 
+        visible: true, 
+        locked: false,
+        objects: []
+      }
+    ]);
+    // Set the new layer as active
+    setActiveLayerIndex(layers.length);
+  };
+
+  // Function to delete a layer
+  const deleteLayer = (index) => {
+    if (layers.length <= 1) {
+      // Don't allow deleting the last layer
+      return;
+    }
+
+    // Remove all objects from the layer
+    const layerToDelete = layers[index];
+    if (fabricCanvas.current && layerToDelete.objects.length > 0) {
+      layerToDelete.objects.forEach(objId => {
+        const objToRemove = fabricCanvas.current.getObjects().find(o => o.id === objId);
+        if (objToRemove) {
+          fabricCanvas.current.remove(objToRemove);
+        }
+      });
+    }
+
+    // Remove the layer from state
+    setLayers(prev => prev.filter((_, i) => i !== index));
+    
+    // Adjust active layer index if needed
+    if (activeLayerIndex >= index) {
+      setActiveLayerIndex(Math.max(0, activeLayerIndex - 1));
+    }
+  };
+
+  // Function to toggle layer visibility
+  const toggleLayerVisibility = (index) => {
+    setLayers(prev => {
+      const newLayers = [...prev];
+      newLayers[index].visible = !newLayers[index].visible;
+      
+      // Update fabric objects visibility
+      if (fabricCanvas.current) {
+        newLayers[index].objects.forEach(objId => {
+          const obj = fabricCanvas.current.getObjects().find(o => o.id === objId);
+          if (obj) {
+            obj.visible = newLayers[index].visible;
+          }
+        });
+        fabricCanvas.current.renderAll();
+      }
+      
+      return newLayers;
+    });
+  };
+
+  // Function to toggle layer lock
+  const toggleLayerLock = (index) => {
+    setLayers(prev => {
+      const newLayers = [...prev];
+      newLayers[index].locked = !newLayers[index].locked;
+      
+      // Update fabric objects selectable property
+      if (fabricCanvas.current) {
+        newLayers[index].objects.forEach(objId => {
+          const obj = fabricCanvas.current.getObjects().find(o => o.id === objId);
+          if (obj) {
+            obj.selectable = !newLayers[index].locked;
+            obj.evented = !newLayers[index].locked;
+          }
+        });
+        fabricCanvas.current.renderAll();
+      }
+      
+      return newLayers;
+    });
+  };
+
+  // Function to rename a layer
+  const renameLayer = (index, newName) => {
+    setLayers(prev => {
+      const newLayers = [...prev];
+      newLayers[index].name = newName;
+      return newLayers;
+    });
+  };
+  
+  // Helper function to clean up Fabric.js canvas container
+  const cleanupFabricContainer = (canvas) => {
+    if (!canvas) return;
+    
+    try {
+      // Fix wrapper element styling
+      if (canvas.wrapperEl) {
+        canvas.wrapperEl.style.position = 'absolute';
+        canvas.wrapperEl.style.width = '100%';
+        canvas.wrapperEl.style.height = '100%';
+        canvas.wrapperEl.style.top = '0';
+        canvas.wrapperEl.style.left = '0';
+        canvas.wrapperEl.style.transform = 'none';
+        canvas.wrapperEl.style.transformOrigin = '0 0';
+        canvas.wrapperEl.classList.add(styles.fabricWrapper);
+      }
+      
+      // Fix lower canvas
+      if (canvas.lowerCanvasEl) {
+        canvas.lowerCanvasEl.style.position = 'absolute';
+        canvas.lowerCanvasEl.style.top = '0';
+        canvas.lowerCanvasEl.style.left = '0';
+        canvas.lowerCanvasEl.style.transform = 'none';
+        canvas.lowerCanvasEl.style.transformOrigin = '0 0';
+      }
+      
+      // Fix upper canvas
+      if (canvas.upperCanvasEl) {
+        canvas.upperCanvasEl.style.position = 'absolute';
+        canvas.upperCanvasEl.style.top = '0';
+        canvas.upperCanvasEl.style.left = '0';
+        canvas.upperCanvasEl.style.transform = 'none';
+        canvas.upperCanvasEl.style.transformOrigin = '0 0';
+      }
+      
+      // Ensure any additional divs don't interfere with layout
+      const parentNode = canvas.wrapperEl?.parentNode;
+      if (parentNode) {
+        const childNodes = parentNode.childNodes;
+        for (let i = 0; i < childNodes.length; i++) {
+          const child = childNodes[i];
+          if (child.nodeType === 1 && child !== canvas.wrapperEl && child !== canvasRef.current) {
+            // Check if this is an extra div created by Fabric.js
+            if (child.classList.contains('canvas-container') || 
+                child.style.position === 'relative' || 
+                child.style.width === canvas.width + 'px') {
+              
+              // Remove any transform or scaling
+              child.style.transform = 'none';
+              child.style.transformOrigin = '0 0';
+              child.style.position = 'absolute';
+              child.style.top = '0';
+              child.style.left = '0';
+              child.style.width = '100%';
+              child.style.height = '100%';
+            }
+          }
+        }
+      }
+      
+      // Force a re-render of the canvas
+      canvas.renderAll();
+      
+    } catch (error) {
+      console.error("Error cleaning up Fabric.js container:", error);
+    }
+  };
+  
   // Initialize fabric canvas
   useEffect(() => {
     // Only initialize when the canvas element is available and we have a PDF loaded
     if (overlayCanvasRef.current && !fabricCanvas.current && pdfPageImages.length > 0) {
       try {
-        // Create a new Fabric.js canvas
+        // Create a new Fabric.js canvas with options to control container behavior
         const canvas = new fabric.Canvas(overlayCanvasRef.current, {
           isDrawingMode: false,
           selection: true,
           width: pdfPageImages[currentPage - 1]?.width || 800,
-          height: pdfPageImages[currentPage - 1]?.height || 600
+          height: pdfPageImages[currentPage - 1]?.height || 600,
+          preserveObjectStacking: true,
+          stopContextMenu: true,
+          fireRightClick: true,
+          // Prevent Fabric.js from modifying the canvas container style
+          enableRetinaScaling: false,
+          renderOnAddRemove: true,
+          controlsAboveOverlay: true
         });
         
         // Store the canvas in the ref
         fabricCanvas.current = canvas;
         
+        // Clean up any extra styling that Fabric.js may have applied to containers
+        cleanupFabricContainer(canvas);
+        
+        // Apply cleanup after a small delay to ensure all Fabric.js initialization is complete
+        setTimeout(() => {
+          cleanupFabricContainer(canvas);
+        }, 100);
+        
         // Set up event listeners
         canvas.on('object:modified', handleObjectModified);
         canvas.on('path:created', handlePathCreated);
+        canvas.on('selection:created', (e) => {
+          // When a text object is selected, update the text options
+          if (e.selected && e.selected[0] && e.selected[0].type === 'i-text') {
+            const selectedText = e.selected[0];
+            setTextOptions({
+              font: selectedText.fontFamily,
+              size: selectedText.fontSize,
+              color: selectedText.fill,
+              backgroundColor: selectedText.backgroundColor,
+              fontWeight: selectedText.fontWeight || 'normal',
+              fontStyle: selectedText.fontStyle || 'normal'
+            });
+          }
+        });
         
         // Initialize drawing brush - only if the canvas is properly initialized
         if (canvas.freeDrawingBrush) {
           canvas.freeDrawingBrush.color = drawingOptions.color;
           canvas.freeDrawingBrush.width = drawingOptions.width;
         }
+        
+        // Set up keyboard shortcuts
+        document.addEventListener('keydown', (e) => {
+          // Delete key to remove selected objects
+          if (e.key === 'Delete' && canvas.getActiveObject()) {
+            if (canvas.getActiveObjects().length > 0) {
+              addToUndoStack();
+              canvas.getActiveObjects().forEach(obj => {
+                canvas.remove(obj);
+              });
+              canvas.discardActiveObject();
+              canvas.renderAll();
+            }
+          }
+          
+          // Ctrl+Z for undo
+          if (e.ctrlKey && e.key === 'z') {
+            e.preventDefault();
+            handleUndo();
+          }
+          
+          // Ctrl+Y for redo
+          if (e.ctrlKey && e.key === 'y') {
+            e.preventDefault();
+            handleRedo();
+          }
+        });
         
         console.log("Fabric.js canvas initialized");
       } catch (error) {
@@ -280,6 +531,11 @@ const PDFEditor = () => {
       setIsLoading(true);
       setError(null);
       
+      // Always start with scale=1.0 (actual size) when loading a new PDF
+      // This ensures we see the document at its exact size initially
+      setScale(1.0);
+      console.log("Loading PDF at actual size (scale=1.0)");
+      
       console.log("Worker source:", pdfjsLib.GlobalWorkerOptions.workerSrc);
       
       // Read the file - create separate copies for PDF.js and pdf-lib
@@ -293,11 +549,20 @@ const PDFEditor = () => {
       
       // Load the PDF with PDF.js
       try {
+        // Use high-quality rendering options
         const loadingTask = pdfjsLib.getDocument({
           data: pdfJsBuffer,
           cMapUrl: 'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/cmaps/',
           cMapPacked: true,
-          standardFontDataUrl: 'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/standard_fonts/'
+          standardFontDataUrl: 'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/standard_fonts/',
+          disableFontFace: false, // Enable font rendering
+          nativeImageDecoderSupport: 'display', // Use native image decoder for better quality
+          isEvalSupported: true,
+          useSystemFonts: true, // Use system fonts for better rendering
+          useWorkerFetch: true,
+          rangeChunkSize: 65536, // Larger chunk size for better performance
+          maxImageSize: -1, // No limit on image size
+          isOffscreenCanvasSupported: true
         });
         
         // Add an error handler to the loading task
@@ -311,13 +576,16 @@ const PDFEditor = () => {
         setPageCount(pdf.numPages);
         setCurrentPage(1);
         
+        // Clear previous page images when loading a new PDF
+        setPdfPageImages([]);
+        
         // Create PDF document with pdf-lib for later saving
         try {
           const pdfDoc = await PDFDocument.load(pdfLibBuffer);
           setPdfFile(pdfDoc);
           setPdfName(file.name);
           
-          // Render the first page
+          // Render the first page at actual size (scale=1.0)
           await renderPage(pdf, 1);
           
           setIsLoading(false);
@@ -344,7 +612,7 @@ const PDFEditor = () => {
     }
   };
   
-  // Update the renderPage function to use Fabric.js
+  // Update the renderPage function to display at actual size by default
   const renderPage = async (pdf, pageNumber) => {
     try {
       if (!pdf) {
@@ -353,7 +621,21 @@ const PDFEditor = () => {
       }
       
       const page = await pdf.getPage(pageNumber);
-      const viewport = page.getViewport({ scale: scale });
+      
+      // Get the original page size from the PDF
+      const originalViewport = page.getViewport({ scale: 1 });
+      const pageWidth = originalViewport.width;
+      const pageHeight = originalViewport.height;
+      
+      // Check if this is likely an A4 document (A4 is approximately 595 x 842 points at 72dpi)
+      const isA4 = Math.abs(pageWidth - 595) < 30 && Math.abs(pageHeight - 842) < 30;
+      
+      // Instead of automatically scaling to container, use actual size (1.0 scale)
+      // We'll only apply user-defined scale if it exists
+      const initialScale = scale || 1.0; // Use 1.0 scale by default for initial render
+      
+      // Create viewport with actual size scale
+      const viewport = page.getViewport({ scale: initialScale });
       
       // Get the canvas element
       const canvas = canvasRef.current;
@@ -362,36 +644,81 @@ const PDFEditor = () => {
         return;
       }
       
-      // Set canvas dimensions to match the viewport
-      canvas.width = viewport.width;
-      canvas.height = viewport.height;
+      // Get device pixel ratio - use a higher value for better quality
+      // Use at least 2x for better quality, but cap at 3x to avoid performance issues
+      const pixelRatio = Math.min(Math.max(window.devicePixelRatio || 1, 2), 3);
       
-      // Prepare canvas for rendering
-      const context = canvas.getContext('2d');
+      // Set canvas dimensions with pixel ratio for high DPI displays
+      canvas.width = viewport.width * pixelRatio;
+      canvas.height = viewport.height * pixelRatio;
+      
+      // Set display size
+      canvas.style.width = `${viewport.width}px`;
+      canvas.style.height = `${viewport.height}px`;
+      
+      // Prepare canvas for rendering with high quality settings
+      const context = canvas.getContext('2d', { alpha: false, willReadFrequently: true });
       if (!context) {
         console.error("Could not get canvas context");
         return;
       }
       
-      console.log(`Rendering page ${pageNumber} with scale ${scale}`);
+      // Scale context to account for the pixel ratio
+      context.scale(pixelRatio, pixelRatio);
       
-      // Render the page
+      // Disable image smoothing for sharper text
+      context.imageSmoothingEnabled = false;
+      context.imageSmoothingQuality = 'high';
+      
+      console.log(`Rendering page ${pageNumber} with scale ${initialScale} and pixel ratio ${pixelRatio}`);
+      
+      // Render the page with high quality
       try {
-        await page.render({
+        // Use a higher quality rendering approach
+        const renderContext = {
           canvasContext: context,
-          viewport: viewport
-        }).promise;
+          viewport: viewport,
+          enableWebGL: true,
+          renderInteractiveForms: true,
+          intent: 'print',  // Use 'print' for highest quality
+          canvasFactory: {
+            create: function(width, height) {
+              const canvas = document.createElement('canvas');
+              canvas.width = width;
+              canvas.height = height;
+              return canvas;
+            },
+            reset: function(canvasAndContext, width, height) {
+              canvasAndContext[0].width = width;
+              canvasAndContext[0].height = height;
+              return canvasAndContext;
+            },
+            destroy: function(canvasAndContext) {
+              // No need to do anything here
+            }
+          },
+          background: 'rgba(255, 255, 255, 1)'  // White background for better quality
+        };
+        
+        await page.render(renderContext).promise;
+        
+        // Apply sharpening filter for better text clarity
+        applySharpening(context, viewport.width, viewport.height);
         
         console.log(`Page ${pageNumber} rendered successfully`);
         
         // Store the rendered page image to prevent it from disappearing
-        const pageImage = canvas.toDataURL('image/png');
+        // Use higher quality PNG encoding
+        const pageImage = canvas.toDataURL('image/png', 1.0);
         setPdfPageImages(prev => {
           const newImages = [...prev];
           newImages[pageNumber - 1] = {
             url: pageImage,
             width: viewport.width,
-            height: viewport.height
+            height: viewport.height,
+            originalWidth: pageWidth,
+            originalHeight: pageHeight,
+            isA4: isA4
           };
           return newImages;
         });
@@ -401,10 +728,26 @@ const PDFEditor = () => {
         if (overlay) {
           overlay.width = viewport.width;
           overlay.height = viewport.height;
+          
+          // Reinitialize Fabric canvas with new dimensions
+          if (fabricCanvas.current) {
+            fabricCanvas.current.setDimensions({
+              width: viewport.width,
+              height: viewport.height
+            });
+          }
         }
         
         // Store the rendered page
         setRenderedPage(pageNumber);
+        
+        // Auto-fit to width only if it's the first page being loaded
+        if (pageNumber === 1 && !scale) {
+          // Delay to ensure the canvas is ready
+          setTimeout(() => {
+            fitToWidth();
+          }, 100);
+        }
       } catch (renderError) {
         console.error("Error rendering page:", renderError);
         setError(`Failed to render page ${pageNumber}: ${renderError.message}`);
@@ -412,6 +755,47 @@ const PDFEditor = () => {
     } catch (pageError) {
       console.error("Error getting page:", pageError);
       setError(`Failed to get page ${pageNumber}: ${pageError.message}`);
+    }
+  };
+  
+  // Add a function to apply sharpening filter for better text clarity
+  const applySharpening = (context, width, height) => {
+    try {
+      // Get image data
+      const imageData = context.getImageData(0, 0, width, height);
+      const data = imageData.data;
+      const sharpeningFactor = 0.3; // Adjust this value for more/less sharpening
+      
+      // Apply unsharp mask filter
+      for (let y = 1; y < height - 1; y++) {
+        for (let x = 1; x < width - 1; x++) {
+          const idx = (y * width + x) * 4;
+          
+          // For each color channel (R, G, B)
+          for (let c = 0; c < 3; c++) {
+            const current = data[idx + c];
+            const neighbors = [
+              data[idx - width * 4 + c], // top
+              data[idx + width * 4 + c], // bottom
+              data[idx - 4 + c],         // left
+              data[idx + 4 + c]          // right
+            ];
+            
+            // Calculate average of neighbors
+            const avg = neighbors.reduce((sum, val) => sum + val, 0) / 4;
+            
+            // Apply sharpening
+            const diff = current - avg;
+            data[idx + c] = Math.min(255, Math.max(0, current + diff * sharpeningFactor));
+          }
+        }
+      }
+      
+      // Put the modified image data back
+      context.putImageData(imageData, 0, 0);
+    } catch (error) {
+      console.error("Error applying sharpening:", error);
+      // Continue without sharpening if there's an error
     }
   };
   
@@ -439,6 +823,24 @@ const PDFEditor = () => {
     }
   };
   
+  // Add resize event listener
+  useEffect(() => {
+    const handleResize = () => {
+      if (pdfDoc && currentPage <= pdfPageImages.length) {
+        // Add a small delay to avoid excessive redraws during resizing
+        setTimeout(() => {
+          renderCurrentPage();
+        }, 100);
+      }
+    };
+    
+    window.addEventListener('resize', handleResize);
+    
+    return () => {
+      window.removeEventListener('resize', handleResize);
+    };
+  }, [pdfDoc, currentPage, pdfPageImages, scale, rotation]);
+  
   // Render the current page on canvas
   useEffect(() => {
     if (canvasRef.current && pdfPageImages.length > 0 && currentPage <= pdfPageImages.length) {
@@ -451,7 +853,12 @@ const PDFEditor = () => {
     const canvas = canvasRef.current;
     if (!canvas) return;
     
-    const context = canvas.getContext('2d');
+    const context = canvas.getContext('2d', { alpha: false, willReadFrequently: true });
+    if (!context) {
+      console.error("Could not get canvas context");
+      return;
+    }
+    
     const pageIndex = currentPage - 1;
     
     if (pageIndex < 0 || pageIndex >= pdfPageImages.length) {
@@ -462,39 +869,120 @@ const PDFEditor = () => {
     // Create an image from the stored data URL
     const img = new Image();
     img.onload = () => {
-      // Calculate dimensions
-      const originalWidth = img.width;
-      const originalHeight = img.height;
-      
-      // Apply scale
-      const scaledWidth = originalWidth * scale;
-      const scaledHeight = originalHeight * scale;
-      
-      // Set canvas dimensions
-      canvas.width = scaledWidth;
-      canvas.height = scaledHeight;
-      
-      // Clear canvas
-      context.clearRect(0, 0, canvas.width, canvas.height);
-      
-      // Save context state for rotation
-      context.save();
-      
-      // Apply rotation if needed
-      if (rotation !== 0) {
-        context.translate(scaledWidth / 2, scaledHeight / 2);
-        context.rotate((rotation * Math.PI) / 180);
-        context.translate(-scaledWidth / 2, -scaledHeight / 2);
+      try {
+        // Safety check to ensure component is still mounted
+        if (!canvasRef.current || !containerRef.current) {
+          console.log("Component unmounted, aborting render");
+          return;
+        }
+        
+        // Get page information
+        const pageInfo = pdfPageImages[pageIndex];
+        const originalWidth = pageInfo.originalWidth || img.width;
+        const originalHeight = pageInfo.originalHeight || img.height;
+        
+        // Use actual size (1.0 scale) as the base, then apply user-defined scale
+        // No automatic container-based scaling
+        const userScale = scale || 1.0; // Default to 1.0 if scale is null
+        
+        // Calculate final dimensions
+        const scaledWidth = originalWidth * userScale;
+        const scaledHeight = originalHeight * userScale;
+        
+        // Get device pixel ratio for high-resolution displays
+        // Use at least 2x for better quality, but cap at 3x to avoid performance issues
+        const pixelRatio = Math.min(Math.max(window.devicePixelRatio || 1, 2), 3);
+        
+        // Set canvas dimensions for high-quality rendering
+        canvas.width = scaledWidth * pixelRatio;
+        canvas.height = scaledHeight * pixelRatio;
+        
+        // Set display size
+        canvas.style.width = `${scaledWidth}px`;
+        canvas.style.height = `${scaledHeight}px`;
+        
+        // Clear canvas
+        context.clearRect(0, 0, canvas.width, canvas.height);
+        
+        // Apply scaling for high DPI
+        context.scale(pixelRatio, pixelRatio);
+        
+        // Disable image smoothing for sharper text
+        context.imageSmoothingEnabled = false;
+        context.imageSmoothingQuality = 'high';
+        
+        // Save context state for rotation
+        context.save();
+        
+        // Apply rotation if needed
+        if (rotation !== 0) {
+          context.translate(scaledWidth / 2, scaledHeight / 2);
+          context.rotate((rotation * Math.PI) / 180);
+          context.translate(-scaledWidth / 2, -scaledHeight / 2);
+        }
+        
+        // Draw the image with high quality
+        context.drawImage(img, 0, 0, scaledWidth, scaledHeight);
+        
+        // Apply sharpening for better text clarity if zoomed in
+        if (userScale > 1.2) {
+          applySharpening(context, scaledWidth, scaledHeight);
+        }
+        
+        // Restore context state
+        context.restore();
+        
+        // Set up overlay canvas dimensions - ensure exact match with PDF canvas
+        if (overlayCanvasRef.current) {
+          overlayCanvasRef.current.width = scaledWidth;
+          overlayCanvasRef.current.height = scaledHeight;
+          
+          // Update Fabric canvas dimensions
+          if (fabricCanvas.current) {
+            fabricCanvas.current.setDimensions({
+              width: scaledWidth,
+              height: scaledHeight
+            });
+            
+            // Make sure the fabric canvas is correctly positioned
+            cleanupFabricContainer(fabricCanvas.current);
+            
+            // Render the fabric canvas to apply changes
+            fabricCanvas.current.renderAll();
+          }
+        }
+        
+        // Draw any annotations
+        if (typeof renderAnnotations === 'function') {
+          renderAnnotations(context);
+        }
+        
+        // Ensure the PDF is visible from the top by scrolling to top
+        if (containerRef.current) {
+          containerRef.current.scrollTop = 0;
+        }
+        
+        // Only center horizontally if zoomed in
+        if (userScale > 1.0 && containerRef.current) {
+          const container = containerRef.current;
+          const containerWidth = container.clientWidth;
+          
+          // Center horizontally but keep at top vertically
+          if (scaledWidth > containerWidth) {
+            setTimeout(() => {
+              container.scrollLeft = (scaledWidth - containerWidth) / 2;
+            }, 50);
+          }
+        }
+      } catch (error) {
+        console.error("Error rendering page:", error);
+        setError(`Failed to render page: ${error.message}`);
       }
-      
-      // Draw the image
-      context.drawImage(img, 0, 0, scaledWidth, scaledHeight);
-      
-      // Restore context state
-      context.restore();
-      
-      // Draw any annotations
-      renderAnnotations(context);
+    };
+    
+    img.onerror = (error) => {
+      console.error("Error loading image:", error);
+      setError("Failed to load PDF page image");
     };
     
     img.src = pdfPageImages[pageIndex].url;
@@ -544,62 +1032,180 @@ const PDFEditor = () => {
   
   // Handle tool selection
   const handleToolSelect = (toolId) => {
-    if (!pdfDoc) {
-      setError("Please open a PDF file first.");
-      return;
+    console.log(`Tool selected: ${toolId}`);
+    
+    // Deactivate previous tool mode
+    if (fabricCanvas.current) {
+      fabricCanvas.current.isDrawingMode = false;
+      
+      // Disable objects selection when switching to drawing mode
+      if (toolId === 'draw' || toolId === 'highlight') {
+        fabricCanvas.current.selection = false;
+        fabricCanvas.current.forEachObject(obj => {
+          obj.selectable = false;
+          obj.evented = false;
+        });
+      } else {
+        fabricCanvas.current.selection = true;
+        fabricCanvas.current.forEachObject(obj => {
+          obj.selectable = true;
+          obj.evented = true;
+        });
+      }
+      
+      // Set drawing mode
+      if (toolId === 'draw') {
+        fabricCanvas.current.isDrawingMode = true;
+        fabricCanvas.current.freeDrawingBrush.color = drawingOptions.color;
+        fabricCanvas.current.freeDrawingBrush.width = drawingOptions.width;
+      }
+      
+      // Set up eraser
+      if (toolId === 'erase' && fabricCanvas.current) {
+        // Enable selection to select objects for deletion
+        fabricCanvas.current.selection = true;
+        fabricCanvas.current.forEachObject(obj => {
+          obj.selectable = true;
+        });
+      }
+      
+      // Set up text tool
+      if (toolId === 'text') {
+        // Enable clicking on canvas to add text
+        fabricCanvas.current.defaultCursor = 'text';
+        fabricCanvas.current.selection = true;
+      } else {
+        fabricCanvas.current.defaultCursor = 'default';
+      }
     }
     
     setActiveToolMode(toolId);
-    
-    if (fabricCanvas.current) {
-      // Update Fabric.js canvas mode
-      switch (toolId) {
-        case 'draw':
-          fabricCanvas.current.isDrawingMode = true;
-          if (fabricCanvas.current.freeDrawingBrush) {
-            fabricCanvas.current.freeDrawingBrush.color = drawingOptions.color;
-            fabricCanvas.current.freeDrawingBrush.width = drawingOptions.width;
-          }
-          break;
-        case 'text':
-          fabricCanvas.current.isDrawingMode = false;
-          // Don't call addTextBox here, let the user click where they want to add text
-          break;
-        case 'shape':
-          fabricCanvas.current.isDrawingMode = false;
-          break;
-        case 'image':
-          fabricCanvas.current.isDrawingMode = false;
-          break;
-        default:
-          fabricCanvas.current.isDrawingMode = false;
-      }
-      
-      // Render the canvas
-      fabricCanvas.current.renderAll();
-    }
   };
   
-  // Add text box to canvas
-  const addTextBox = (x = 100, y = 100) => {
-    if (!fabricCanvas.current) {
-      console.error("Fabric canvas not initialized");
-      return;
+  // Add function to apply current drawing options to selected object
+  const applyStylesToSelected = () => {
+    if (!fabricCanvas.current) return;
+    
+    const activeObject = fabricCanvas.current.getActiveObject();
+    if (!activeObject) return;
+    
+    // Start with the current drawing options
+    const styleUpdates = {
+      stroke: drawingOptions.color,
+      strokeWidth: drawingOptions.width,
+      opacity: drawingOptions.opacity
+    };
+    
+    // Only set fill if enabled - this is the part we're improving
+    if (drawingOptions.fillEnabled) {
+      styleUpdates.fill = drawingOptions.fill;
+    } else {
+      // If fill is disabled, set transparent fill for all shapes
+      styleUpdates.fill = 'transparent';
     }
     
-    const text = new fabric.IText('Edit this text', {
-      left: x,
-      top: y,
-      fontFamily: textOptions.font,
-      fontSize: textOptions.size,
-      fill: textOptions.color,
-      editable: true
-    });
+    // Apply styles based on object type
+    if (activeObject.type === 'i-text') {
+      // For text objects, handle fill and stroke differently
+      styleUpdates.fill = drawingOptions.color; // Text color
+      
+      // Set background color if fill is enabled
+      if (drawingOptions.fillEnabled) {
+        styleUpdates.backgroundColor = drawingOptions.fill;
+      } else {
+        styleUpdates.backgroundColor = null;
+      }
+    }
     
-    fabricCanvas.current.add(text);
-    fabricCanvas.current.setActiveObject(text);
+    console.log("Applying styles to object:", activeObject.type, styleUpdates);
+    
+    // Apply styles to group objects
+    if (activeObject.type === 'activeSelection') {
+      // Apply styles to all objects in the group
+      activeObject.forEachObject(obj => {
+        const objStyles = {...styleUpdates};
+        
+        // Adjust for text objects in the group
+        if (obj.type === 'i-text') {
+          objStyles.fill = styleUpdates.stroke; // Text color
+          if (drawingOptions.fillEnabled) {
+            objStyles.backgroundColor = styleUpdates.fill;
+          } else {
+            objStyles.backgroundColor = null;
+          }
+        }
+        
+        obj.set(objStyles);
+      });
+    } else {
+      // Apply to single object
+      activeObject.set(styleUpdates);
+    }
+    
+    // Update the canvas
     fabricCanvas.current.renderAll();
     addToUndoStack();
+  };
+  
+  // Enhanced addTextBox function that creates a better editable text object
+  const addTextBox = (x = 100, y = 100) => {
+    if (!fabricCanvas.current) return;
+    
+    try {
+      console.log("Adding text at", x, y);
+      
+      // Create a text box with default text
+      const text = new fabric.IText('Edit this text', {
+        left: x,
+        top: y,
+        fontFamily: textOptions.font,
+        fontSize: textOptions.size,
+        fill: textOptions.color,
+        backgroundColor: drawingOptions.fillEnabled ? drawingOptions.fill : null,
+        padding: 5,
+        cornerSize: 8,
+        transparentCorners: false,
+        cornerColor: '#0069d9',
+        borderColor: '#0069d9',
+        editingBorderColor: '#0069d9',
+        cursorColor: '#333',
+        cursorWidth: 2,
+        selectionColor: 'rgba(0, 105, 217, 0.3)',
+        lockScalingFlip: true,
+        centeredScaling: true,
+        id: `text_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+        visible: layers[activeLayerIndex]?.visible ?? true,
+        selectable: !(layers[activeLayerIndex]?.locked ?? false),
+        evented: !(layers[activeLayerIndex]?.locked ?? false)
+      });
+      
+      // Enter editing mode immediately
+      fabricCanvas.current.add(text);
+      fabricCanvas.current.setActiveObject(text);
+      text.enterEditing();
+      
+      // Position cursor at end of text
+      text.selectAll();
+      
+      // Update canvas
+      fabricCanvas.current.renderAll();
+      
+      // Add the object ID to the active layer
+      setLayers(prev => {
+        const newLayers = [...prev];
+        if (newLayers[activeLayerIndex]) {
+          newLayers[activeLayerIndex].objects.push(text.id);
+        }
+        return newLayers;
+      });
+      
+      // Save state for undo
+      addToUndoStack();
+      
+      console.log("Text box added successfully");
+    } catch (error) {
+      console.error("Error adding text box:", error);
+    }
   };
   
   // Add image
@@ -632,51 +1238,327 @@ const PDFEditor = () => {
     }
   };
   
-  // Add shape
-  const addShape = (type) => {
-    let shape;
+  // Function to start shape drawing mode
+  const startShapeDrawing = (type) => {
+    setCurrentShapeType(type);
+    setIsDrawingShape(true);
     
-    switch (type) {
+    // Set cursor to crosshair to indicate drawing mode
+    if (fabricCanvas.current) {
+      fabricCanvas.current.defaultCursor = 'crosshair';
+      fabricCanvas.current.selection = false;
+      
+      // Disable selection of existing objects during drawing
+      fabricCanvas.current.forEachObject(obj => {
+        obj.selectable = false;
+        obj.evented = false;
+      });
+    }
+    
+    console.log(`Starting shape drawing mode: ${type}`);
+  };
+
+  // Function to handle canvas mouse down for shape drawing
+  const handleCanvasMouseDown = (e) => {
+    if (!isDrawingShape || !fabricCanvas.current) return;
+    
+    // Get pointer coordinates
+    const pointer = fabricCanvas.current.getPointer(e.e);
+    setDrawStartPoint({ x: pointer.x, y: pointer.y });
+    
+    // Create initial shape based on type
+    let shape;
+    const commonProps = {
+      left: pointer.x,
+      top: pointer.y,
+      width: 0,
+      height: 0,
+      fill: drawingOptions.fillEnabled ? drawingOptions.fill : 'transparent',
+      stroke: drawingOptions.color,
+      strokeWidth: drawingOptions.width,
+      opacity: drawingOptions.opacity,
+      strokeUniform: true,
+      transparentCorners: false,
+      cornerColor: '#0069d9',
+      cornerSize: 8,
+      cornerStyle: 'circle',
+      borderColor: '#0069d9'
+    };
+    
+    switch (currentShapeType) {
       case 'rect':
+      case 'square':
         shape = new fabric.Rect({
-          left: 50,
-          top: 50,
-          width: 100,
-          height: 100,
-          fill: 'transparent',
-          stroke: drawingOptions.color,
-          strokeWidth: drawingOptions.width
+          ...commonProps,
+          originX: 'left',
+          originY: 'top'
         });
         break;
       case 'circle':
         shape = new fabric.Circle({
-          left: 50,
-          top: 50,
-          radius: 50,
-          fill: 'transparent',
-          stroke: drawingOptions.color,
-          strokeWidth: drawingOptions.width
+          ...commonProps,
+          left: pointer.x,
+          top: pointer.y,
+          radius: 1, // Start with a tiny radius
+          originX: 'center',
+          originY: 'center'
         });
         break;
-      case 'arrow':
-        // Create custom arrow shape
-        const points = [0, 0, 100, 0, 95, -5, 100, 0, 95, 5];
-        shape = new fabric.Polyline(points, {
-          left: 50,
-          top: 50,
+      case 'ellipse':
+        shape = new fabric.Ellipse({
+          ...commonProps,
+          left: pointer.x,
+          top: pointer.y,
+          rx: 1, // Start with tiny radii
+          ry: 1,
+          originX: 'center',
+          originY: 'center'
+        });
+        break;
+      case 'triangle':
+        shape = new fabric.Triangle({
+          ...commonProps,
+          originX: 'left',
+          originY: 'top'
+        });
+        break;
+      case 'line':
+        shape = new fabric.Line([pointer.x, pointer.y, pointer.x, pointer.y], {
           stroke: drawingOptions.color,
           strokeWidth: drawingOptions.width,
-          fill: 'transparent',
-          originX: 'left',
-          originY: 'center'
+          opacity: drawingOptions.opacity,
+          fill: drawingOptions.fillEnabled ? drawingOptions.fill : 'transparent'
+        });
+        break;
+      default:
+        return; // Exit if shape type is not supported for drawing
+    }
+    
+    fabricCanvas.current.add(shape);
+    fabricCanvas.current.renderAll();
+    setTempShapeObj(shape);
+  };
+
+  // Function to handle canvas mouse move for shape drawing
+  const handleCanvasMouseMove = (e) => {
+    if (!isDrawingShape || !tempShapeObj || !fabricCanvas.current) return;
+    
+    const pointer = fabricCanvas.current.getPointer(e.e);
+    
+    // Calculate width and height
+    let width = Math.abs(pointer.x - drawStartPoint.x);
+    let height = Math.abs(pointer.y - drawStartPoint.y);
+    
+    // Calculate left and top positions if the shape grows in negative direction
+    let left = drawStartPoint.x;
+    let top = drawStartPoint.y;
+    
+    if (pointer.x < drawStartPoint.x) {
+      left = pointer.x;
+    }
+    
+    if (pointer.y < drawStartPoint.y) {
+      top = pointer.y;
+    }
+    
+    // Enforce square aspect ratio if needed
+    if (currentShapeType === 'square') {
+      const size = Math.max(width, height);
+      width = size;
+      height = size;
+      
+      // Adjust left/top for square to maintain the corner where the drag started
+      if (pointer.x < drawStartPoint.x) {
+        left = drawStartPoint.x - size;
+      }
+      
+      if (pointer.y < drawStartPoint.y) {
+        top = drawStartPoint.y - size;
+      }
+    }
+    
+    // Update shape based on type
+    switch (currentShapeType) {
+      case 'rect':
+      case 'square':
+      case 'triangle':
+        tempShapeObj.set({
+          width: width,
+          height: height,
+          left: left,
+          top: top
+        });
+        break;
+      case 'circle':
+        // For circle, calculate radius based on the distance from center
+        const dx = pointer.x - drawStartPoint.x;
+        const dy = pointer.y - drawStartPoint.y;
+        const radius = Math.sqrt(dx * dx + dy * dy) / 2;
+        
+        tempShapeObj.set({
+          radius: radius
+        });
+        break;
+      case 'ellipse':
+        // For ellipse, set rx and ry based on the width and height
+        tempShapeObj.set({
+          rx: width / 2,
+          ry: height / 2
+        });
+        break;
+      case 'line':
+        // For line, update end point
+        tempShapeObj.set({
+          x2: pointer.x,
+          y2: pointer.y
         });
         break;
     }
     
-    if (shape) {
-      fabricCanvas.current.add(shape);
-      fabricCanvas.current.setActiveObject(shape);
-      addToUndoStack();
+    fabricCanvas.current.renderAll();
+  };
+
+  // Function to handle canvas mouse up for shape drawing
+  const handleCanvasMouseUp = () => {
+    if (!isDrawingShape || !tempShapeObj || !fabricCanvas.current) return;
+    
+    // Finish the shape and assign an ID
+    tempShapeObj.id = `shape_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    tempShapeObj.visible = layers[activeLayerIndex]?.visible ?? true;
+    tempShapeObj.selectable = !(layers[activeLayerIndex]?.locked ?? false);
+    tempShapeObj.evented = !(layers[activeLayerIndex]?.locked ?? false);
+    
+    // Add the shape to the current layer
+    setLayers(prev => {
+      const newLayers = [...prev];
+      if (newLayers[activeLayerIndex]) {
+        newLayers[activeLayerIndex].objects.push(tempShapeObj.id);
+      }
+      return newLayers;
+    });
+    
+    // Activate the shape for further editing
+    fabricCanvas.current.setActiveObject(tempShapeObj);
+    
+    // Reset drawing state
+    setTempShapeObj(null);
+    setIsDrawingShape(false);
+    
+    // Reset cursor and enable selection
+    fabricCanvas.current.defaultCursor = 'default';
+    fabricCanvas.current.selection = true;
+    
+    // Re-enable selection of objects
+    fabricCanvas.current.forEachObject(obj => {
+      if (!layers.some(layer => layer.locked && layer.objects.includes(obj.id))) {
+        obj.selectable = true;
+        obj.evented = true;
+      }
+    });
+    
+    // Add to undo stack
+    addToUndoStack();
+  };
+
+  // Add event listeners to fabric canvas for shape drawing
+  useEffect(() => {
+    if (fabricCanvas.current && isDrawingShape) {
+      fabricCanvas.current.on('mouse:down', handleCanvasMouseDown);
+      fabricCanvas.current.on('mouse:move', handleCanvasMouseMove);
+      fabricCanvas.current.on('mouse:up', handleCanvasMouseUp);
+    }
+    
+    return () => {
+      if (fabricCanvas.current) {
+        fabricCanvas.current.off('mouse:down', handleCanvasMouseDown);
+        fabricCanvas.current.off('mouse:move', handleCanvasMouseMove);
+        fabricCanvas.current.off('mouse:up', handleCanvasMouseUp);
+      }
+    };
+  }, [isDrawingShape, tempShapeObj, drawStartPoint, currentShapeType, fabricCanvas.current]);
+
+  // Modified addShape function to start drawing mode instead of creating fixed shapes
+  const addShape = (type) => {
+    if (type === 'star' || type === 'heart' || type === 'arrow') {
+      // For complex shapes, keep the old behavior of adding predefined shapes
+      let shape;
+      
+      // Default props for all shapes
+      const commonProps = {
+        left: 50,
+        top: 50,
+        fill: drawingOptions.fillEnabled ? drawingOptions.fill : 'transparent',
+        stroke: drawingOptions.color,
+        strokeWidth: drawingOptions.width,
+        opacity: drawingOptions.opacity,
+        strokeUniform: true,
+        transparentCorners: false,
+        cornerColor: '#0069d9',
+        cornerSize: 8,
+        cornerStyle: 'circle',
+        borderColor: '#0069d9',
+        id: `shape_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+        visible: layers[activeLayerIndex]?.visible ?? true,
+        selectable: !(layers[activeLayerIndex]?.locked ?? false),
+        evented: !(layers[activeLayerIndex]?.locked ?? false)
+      };
+      
+      if (type === 'star') {
+        // Create a star shape
+        const starPoints = [];
+        const spikes = 5;
+        const outerRadius = 50;
+        const innerRadius = 25;
+        
+        for (let i = 0; i < spikes * 2; i++) {
+          const radius = i % 2 === 0 ? outerRadius : innerRadius;
+          const angle = (Math.PI / spikes) * i;
+          const x = radius * Math.cos(angle);
+          const y = radius * Math.sin(angle);
+          starPoints.push({ x, y });
+        }
+        
+        shape = new fabric.Polygon(starPoints, {
+          ...commonProps
+        });
+      } else if (type === 'heart') {
+        // Create a heart shape path
+        const heartPath = 'M 10,30 A 20,20 0,0,1 50,30 A 20,20 0,0,1 90,30 Q 90,60 50,90 Q 10,60 10,30 z';
+        shape = new fabric.Path(heartPath, {
+          ...commonProps,
+          scaleX: 0.5,
+          scaleY: 0.5
+        });
+      } else if (type === 'arrow') {
+        // Create custom arrow shape
+        const points = [0, 0, 100, 0, 95, -5, 100, 0, 95, 5];
+        shape = new fabric.Polyline(points, {
+          ...commonProps,
+          originX: 'left',
+          originY: 'center'
+        });
+      }
+      
+      if (shape) {
+        console.log(`Adding ${type} shape with fill:`, commonProps.fill);
+        
+        fabricCanvas.current.add(shape);
+        fabricCanvas.current.setActiveObject(shape);
+        
+        // Add the object ID to the active layer
+        setLayers(prev => {
+          const newLayers = [...prev];
+          if (newLayers[activeLayerIndex]) {
+            newLayers[activeLayerIndex].objects.push(shape.id);
+          }
+          return newLayers;
+        });
+        
+        addToUndoStack();
+      }
+    } else {
+      // For basic shapes, use the new drawing mode
+      startShapeDrawing(type);
     }
   };
   
@@ -697,7 +1579,34 @@ const PDFEditor = () => {
     }
     
     try {
-      const json = fabricCanvas.current.toJSON();
+      // Assign unique IDs to objects if they don't have one
+      fabricCanvas.current.getObjects().forEach(obj => {
+        if (!obj.id) {
+          obj.id = `obj_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+        }
+      });
+      
+      // Update the active layer's objects list
+      setLayers(prev => {
+        const newLayers = [...prev];
+        if (newLayers[activeLayerIndex]) {
+          // Get all objects on the canvas
+          const objects = fabricCanvas.current.getObjects();
+          
+          // Filter objects not already in other layers
+          const otherLayerObjects = newLayers
+            .filter((_, i) => i !== activeLayerIndex)
+            .flatMap(layer => layer.objects);
+          
+          // Update active layer with new objects
+          newLayers[activeLayerIndex].objects = objects
+            .filter(obj => !otherLayerObjects.includes(obj.id))
+            .map(obj => obj.id);
+        }
+        return newLayers;
+      });
+      
+      const json = fabricCanvas.current.toJSON(['id']);
       setUndoStack(prev => [...prev, json]);
       setRedoStack([]);
     } catch (error) {
@@ -990,23 +1899,23 @@ const PDFEditor = () => {
           0x0A, 0x34, 0x20, 0x30, 0x20, 0x6F, 0x62, 0x6A, 0x0A, 0x3C, 0x3C, 0x2F,
           0x4C, 0x65, 0x6E, 0x67, 0x74, 0x68, 0x20, 0x31, 0x30, 0x3E, 0x3E, 0x73,
           0x74, 0x72, 0x65, 0x61, 0x6D, 0x0A, 0x42, 0x54, 0x0A, 0x2F, 0x46, 0x31,
-          0x20, 0x39, 0x20, 0x54, 0x66, 0x0A, 0x31, 0x20, 0x30, 0x20, 0x30, 0x20,
-          0x31, 0x20, 0x31, 0x20, 0x32, 0x20, 0x54, 0x6D, 0x0A, 0x28, 0x29, 0x54,
-          0x6A, 0x0A, 0x45, 0x54, 0x0A, 0x65, 0x6E, 0x64, 0x73, 0x74, 0x72, 0x65,
-          0x61, 0x6D, 0x0A, 0x65, 0x6E, 0x64, 0x6F, 0x62, 0x6A, 0x0A, 0x78, 0x72,
-          0x65, 0x66, 0x0A, 0x30, 0x20, 0x35, 0x0A, 0x30, 0x30, 0x30, 0x30, 0x30,
+          0x20, 0x39, 0x20, 0x54, 0x66, 0x0A, 0x31, 0x20, 0x30, 0x20, 0x30, 0x20, 0x31,
+          0x20, 0x31, 0x20, 0x32, 0x20, 0x54, 0x6D, 0x0A, 0x28, 0x29, 0x54, 0x6A,
+          0x0A, 0x45, 0x54, 0x0A, 0x65, 0x6E, 0x64, 0x73, 0x74, 0x72, 0x65, 0x61,
+          0x6D, 0x0A, 0x65, 0x6E, 0x64, 0x6F, 0x62, 0x6A, 0x0A, 0x78, 0x72, 0x65,
+          0x66, 0x0A, 0x30, 0x20, 0x35, 0x0A, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30,
           0x30, 0x30, 0x30, 0x30, 0x30, 0x20, 0x36, 0x35, 0x35, 0x33, 0x35, 0x20,
           0x66, 0x0A, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x31, 0x38,
           0x20, 0x30, 0x30, 0x30, 0x30, 0x30, 0x20, 0x6E, 0x0A, 0x30, 0x30, 0x30,
-          0x30, 0x30, 0x30, 0x30, 0x30, 0x37, 0x37, 0x20, 0x30, 0x30, 0x30, 0x30,
-          0x30, 0x20, 0x6E, 0x0A, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x31,
-          0x37, 0x38, 0x20, 0x30, 0x30, 0x30, 0x30, 0x30, 0x20, 0x6E, 0x0A, 0x30,
-          0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x33, 0x30, 0x38, 0x20, 0x30, 0x30,
-          0x30, 0x30, 0x30, 0x20, 0x6E, 0x0A, 0x74, 0x72, 0x61, 0x69, 0x6C, 0x65,
-          0x72, 0x0A, 0x3C, 0x3C, 0x2F, 0x53, 0x69, 0x7A, 0x65, 0x20, 0x35, 0x2F,
-          0x52, 0x6F, 0x6F, 0x74, 0x20, 0x31, 0x20, 0x30, 0x20, 0x52, 0x3E, 0x3E, 0x0A,
-          0x73, 0x74, 0x61, 0x72, 0x74, 0x78, 0x72, 0x65, 0x66, 0x0A, 0x34, 0x30, 0x36,
-          0x0A, 0x25, 0x25, 0x45, 0x4F, 0x46
+          0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x37, 0x37, 0x20, 0x30, 0x30, 0x30,
+          0x30, 0x30, 0x30, 0x20, 0x6E, 0x0A, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30,
+          0x30, 0x31, 0x37, 0x38, 0x20, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30,
+          0x33, 0x30, 0x38, 0x20, 0x30, 0x30, 0x30, 0x30, 0x30, 0x20, 0x6E, 0x0A,
+          0x74, 0x72, 0x61, 0x69, 0x6C, 0x65, 0x72, 0x0A, 0x3C, 0x3C, 0x2F, 0x53,
+          0x69, 0x7A, 0x65, 0x20, 0x35, 0x2F, 0x52, 0x6F, 0x6F, 0x74, 0x20, 0x31,
+          0x20, 0x30, 0x20, 0x52, 0x3E, 0x3E, 0x0A, 0x73, 0x74, 0x61, 0x72, 0x74,
+          0x78, 0x72, 0x65, 0x66, 0x0A, 0x34, 0x30, 0x36, 0x0A, 0x25, 0x25, 0x45,
+          0x4F, 0x46
         ]);
         
         // Try to create a simple document to test the worker
@@ -1053,24 +1962,107 @@ const PDFEditor = () => {
     { id: 'erase', icon: <FaEraser /> }
   ];
 
-  // Handle canvas click
+  // Update handleCanvasClick to properly handle text insertion
   const handleCanvasClick = (e) => {
-    if (!pdfDoc || !fabricCanvas.current) {
-      return;
-    }
+    // Skip if in shape drawing mode
+    if (isDrawingShape) return;
     
-    if (activeToolMode === 'text') {
-      try {
-        // Get click position relative to the canvas
-        const rect = e.currentTarget.getBoundingClientRect();
-        const x = e.clientX - rect.left;
-        const y = e.clientY - rect.top;
-        
-        // Add text at click position
-        addTextBox(x, y);
-      } catch (error) {
-        console.error("Error adding text:", error);
+    // Handle adding text on click when in text mode
+    if (activeToolMode === 'text' && fabricCanvas.current) {
+      // Get click coordinates relative to canvas
+      const canvas = fabricCanvas.current.upperCanvasEl;
+      const rect = canvas.getBoundingClientRect();
+      
+      // Calculate position, accounting for scroll
+      const x = e.clientX - rect.left + canvas.parentElement.scrollLeft;
+      const y = e.clientY - rect.top + canvas.parentElement.scrollTop;
+      
+      // Add text at click position
+      console.log("Adding text at", x, y);
+      addTextBox(x, y);
+    }
+  };
+
+  // Toggle sidebar visibility
+  const toggleSidebar = () => {
+    setSidebarVisible(prev => !prev);
+  };
+
+  // Add zoom control functions
+  const zoomIn = () => {
+    setScale(prev => {
+      const newScale = Math.min(5, prev + 0.25); // Cap at 5x zoom
+      return newScale;
+    });
+  };
+  
+  const zoomOut = () => {
+    setScale(prev => {
+      const newScale = Math.max(0.5, prev - 0.25); // Minimum 0.5x zoom
+      return newScale;
+    });
+  };
+  
+  // Optimize the fitToWidth function to make it faster and more reliable
+  const fitToWidth = () => {
+    try {
+      if (!containerRef.current || pdfPageImages.length === 0) {
+        console.log("Cannot fit to width: container or page images not available");
+        return;
       }
+      
+      setIsLoading(true);
+      
+      // Use setTimeout to allow the loading indicator to appear
+      setTimeout(() => {
+        try {
+          // Get available container width with minimal padding
+          const containerWidth = containerRef.current.clientWidth - 20; // 10px padding on each side
+          const pageIndex = currentPage - 1;
+          
+          if (pageIndex < 0 || pageIndex >= pdfPageImages.length) {
+            console.error("Invalid page index for fit to width");
+            setIsLoading(false);
+            return;
+          }
+          
+          const pageInfo = pdfPageImages[pageIndex];
+          
+          // Get the original width of the PDF page
+          const pageWidth = pageInfo.originalWidth;
+          
+          if (!pageWidth) {
+            console.error("Cannot determine page width for fit to width");
+            setIsLoading(false);
+            return;
+          }
+          
+          // Calculate the exact scale needed to fit the PDF to the container width
+          // This is a direct 1:1 calculation with no additional scaling factors
+          const exactScale = containerWidth / pageWidth;
+          
+          // Log the scale we're applying for debugging
+          console.log(`Fit to width: container=${containerWidth}px, page=${pageWidth}px, scale=${exactScale}`);
+          
+          // Apply the new scale
+          setScale(exactScale);
+          
+          // Ensure we scroll to the top after scaling
+          if (containerRef.current) {
+            setTimeout(() => {
+              containerRef.current.scrollTop = 0;
+            }, 50);
+          }
+          
+          setIsLoading(false);
+        } catch (error) {
+          console.error("Error in fitToWidth:", error);
+          setIsLoading(false);
+        }
+      }, 10);
+    } catch (error) {
+      console.error("Error in fitToWidth:", error);
+      setIsLoading(false);
     }
   };
 
@@ -1158,19 +2150,37 @@ const PDFEditor = () => {
             {/* Zoom controls */}
             <div className={styles.toolGroup}>
               <button
-                onClick={() => setScale(prev => Math.max(0.5, prev - 0.1))}
+                onClick={zoomOut}
                 className={styles.toolButton}
                 title="Zoom Out"
+                disabled={scale <= 0.5}
               >
                 -
               </button>
               <span className="text-white">{Math.round(scale * 100)}%</span>
               <button
-                onClick={() => setScale(prev => Math.min(2, prev + 0.1))}
+                onClick={zoomIn}
                 className={styles.toolButton}
                 title="Zoom In"
+                disabled={scale >= 5}
               >
                 +
+              </button>
+              <button
+                onClick={fitToWidth}
+                className={styles.toolButton}
+                title="Fit to Width"
+              >
+                ↔
+              </button>
+              
+              {/* Add sidebar toggle button */}
+              <button
+                onClick={toggleSidebar}
+                className={styles.toolButton}
+                title={sidebarVisible ? "Hide Sidebar" : "Show Sidebar"}
+              >
+                {sidebarVisible ? "◀" : "▶"}
               </button>
             </div>
           </div>
@@ -1178,35 +2188,150 @@ const PDFEditor = () => {
         
         {/* Main editor area */}
         <div className={styles.mainContent}>
-          {/* Tools sidebar */}
-          <div className={styles.sidebar}>
+          {/* Tools sidebar - make it collapsible */}
+          <div className={`${styles.sidebar} ${sidebarVisible ? styles.sidebarVisible : styles.sidebarHidden}`}>
             {/* Tool-specific options */}
             {activeToolMode === 'text' && (
               <div className={styles.sidebarSection}>
                 <h3 className={styles.sidebarTitle}>Text Options</h3>
-                <select
-                  value={textOptions.font}
-                  onChange={(e) => setTextOptions({...textOptions, font: e.target.value})}
-                  className={styles.select}
-                >
-                  {availableFonts.map(font => (
-                    <option key={font.value} value={font.value}>{font.name}</option>
-                  ))}
-                </select>
-                <input
-                  type="number"
-                  value={textOptions.size}
-                  onChange={(e) => setTextOptions({...textOptions, size: parseInt(e.target.value)})}
-                  className={styles.input}
-                  min="8"
-                  max="72"
-                />
-                <input
-                  type="color"
-                  value={textOptions.color}
-                  onChange={(e) => setTextOptions({...textOptions, color: e.target.value})}
-                  className={styles.input}
-                />
+                <div className={styles.controlGroup}>
+                  <label htmlFor="font-family" className={styles.label}>Font</label>
+                  <select
+                    id="font-family"
+                    value={textOptions.font}
+                    onChange={(e) => {
+                      setTextOptions({...textOptions, font: e.target.value});
+                      
+                      // Update selected text object if any
+                      if (fabricCanvas.current && fabricCanvas.current.getActiveObject() && 
+                          fabricCanvas.current.getActiveObject().type === 'i-text') {
+                        fabricCanvas.current.getActiveObject().set('fontFamily', e.target.value);
+                        fabricCanvas.current.renderAll();
+                      }
+                    }}
+                    className={styles.select}
+                  >
+                    {availableFonts.map(font => (
+                      <option key={font.value} value={font.value}>{font.name}</option>
+                    ))}
+                  </select>
+                </div>
+                
+                <div className={styles.controlGroup}>
+                  <label htmlFor="font-size" className={styles.label}>Size</label>
+                  <input
+                    id="font-size"
+                    type="number"
+                    value={textOptions.size}
+                    onChange={(e) => {
+                      const newSize = parseInt(e.target.value);
+                      setTextOptions({...textOptions, size: newSize});
+                      
+                      // Update selected text object if any
+                      if (fabricCanvas.current && fabricCanvas.current.getActiveObject() && 
+                          fabricCanvas.current.getActiveObject().type === 'i-text') {
+                        fabricCanvas.current.getActiveObject().set('fontSize', newSize);
+                        fabricCanvas.current.renderAll();
+                      }
+                    }}
+                    className={styles.input}
+                    min="8"
+                    max="72"
+                  />
+                </div>
+                
+                <div className={styles.controlGroup}>
+                  <label htmlFor="text-color" className={styles.label}>Text Color</label>
+                  <input
+                    id="text-color"
+                    type="color"
+                    value={textOptions.color}
+                    onChange={(e) => {
+                      setTextOptions({...textOptions, color: e.target.value});
+                      
+                      // Update selected text object if any
+                      if (fabricCanvas.current && fabricCanvas.current.getActiveObject() && 
+                          fabricCanvas.current.getActiveObject().type === 'i-text') {
+                        fabricCanvas.current.getActiveObject().set('fill', e.target.value);
+                        fabricCanvas.current.renderAll();
+                      }
+                    }}
+                    className={styles.colorInput}
+                  />
+                </div>
+                
+                <div className={styles.controlGroup}>
+                  <label htmlFor="background-color" className={styles.label}>Background</label>
+                  <div className={styles.colorInputWrapper}>
+                    <input
+                      id="background-color"
+                      type="color"
+                      value={textOptions.backgroundColor || '#ffffff'}
+                      onChange={(e) => {
+                        const newColor = e.target.value;
+                        setTextOptions({...textOptions, backgroundColor: newColor});
+                        
+                        // Update selected text object if any
+                        if (fabricCanvas.current && fabricCanvas.current.getActiveObject() && 
+                            fabricCanvas.current.getActiveObject().type === 'i-text') {
+                          fabricCanvas.current.getActiveObject().set('backgroundColor', newColor);
+                          fabricCanvas.current.renderAll();
+                        }
+                      }}
+                      className={styles.colorInput}
+                    />
+                    <button
+                      onClick={() => {
+                        setTextOptions({...textOptions, backgroundColor: null});
+                        
+                        // Update selected text object if any
+                        if (fabricCanvas.current && fabricCanvas.current.getActiveObject() && 
+                            fabricCanvas.current.getActiveObject().type === 'i-text') {
+                          fabricCanvas.current.getActiveObject().set('backgroundColor', null);
+                          fabricCanvas.current.renderAll();
+                        }
+                      }}
+                      className={styles.smallButton}
+                      title="Remove background"
+                    >
+                      Clear
+                    </button>
+                  </div>
+                </div>
+                
+                <div className={styles.controlGroup}>
+                  <button
+                    onClick={() => {
+                      if (fabricCanvas.current && fabricCanvas.current.getActiveObject() && 
+                          fabricCanvas.current.getActiveObject().type === 'i-text') {
+                        // Bold toggle
+                        const text = fabricCanvas.current.getActiveObject();
+                        const currentWeight = text.get('fontWeight') === 'bold' ? 'normal' : 'bold';
+                        text.set('fontWeight', currentWeight);
+                        fabricCanvas.current.renderAll();
+                      }
+                    }}
+                    className={styles.button}
+                  >
+                    Bold
+                  </button>
+                  
+                  <button
+                    onClick={() => {
+                      if (fabricCanvas.current && fabricCanvas.current.getActiveObject() && 
+                          fabricCanvas.current.getActiveObject().type === 'i-text') {
+                        // Italic toggle
+                        const text = fabricCanvas.current.getActiveObject();
+                        const currentStyle = text.get('fontStyle') === 'italic' ? 'normal' : 'italic';
+                        text.set('fontStyle', currentStyle);
+                        fabricCanvas.current.renderAll();
+                      }
+                    }}
+                    className={styles.button}
+                  >
+                    Italic
+                  </button>
+                </div>
               </div>
             )}
             
@@ -1242,13 +2367,322 @@ const PDFEditor = () => {
             {activeToolMode === 'shape' && (
               <div className={styles.sidebarSection}>
                 <h3 className={styles.sidebarTitle}>Shapes</h3>
-                <div className="grid grid-cols-2 gap-2">
-                  <button onClick={() => addShape('rect')} className={styles.button}>Rectangle</button>
-                  <button onClick={() => addShape('circle')} className={styles.button}>Circle</button>
-                  <button onClick={() => addShape('arrow')} className={styles.button}>Arrow</button>
+                
+                {/* Drawing mode indicator */}
+                {isDrawingShape && (
+                  <div className={styles.drawingModeIndicator}>
+                    <div className={styles.pulsingDot}></div>
+                    <span>Drawing Mode: {currentShapeType}</span>
+                    <button 
+                      className={styles.cancelButton}
+                      onClick={() => {
+                        setIsDrawingShape(false);
+                        if (tempShapeObj && fabricCanvas.current) {
+                          fabricCanvas.current.remove(tempShapeObj);
+                          fabricCanvas.current.renderAll();
+                        }
+                        setTempShapeObj(null);
+                        
+                        // Reset cursor and enable selection
+                        if (fabricCanvas.current) {
+                          fabricCanvas.current.defaultCursor = 'default';
+                          fabricCanvas.current.selection = true;
+                          fabricCanvas.current.forEachObject(obj => {
+                            if (!layers.some(layer => layer.locked && layer.objects.includes(obj.id))) {
+                              obj.selectable = true;
+                              obj.evented = true;
+                            }
+                          });
+                        }
+                      }}
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                )}
+                
+                {!isDrawingShape && (
+                  <div className={styles.drawingInstructions}>
+                    <p>Select a shape, then click and drag on the PDF to draw it.</p>
+                  </div>
+                )}
+                
+                {/* Fill color picker */}
+                <div className={styles.colorOptions}>
+                  <div className={styles.controlGroup}>
+                    <label className={styles.label}>
+                      <span className={styles.controlLabel}>Stroke Color</span>
+                      <input
+                        type="color"
+                        value={drawingOptions.color}
+                        onChange={(e) => setDrawingOptions({...drawingOptions, color: e.target.value})}
+                        className={styles.colorInput}
+                      />
+                    </label>
+                  </div>
+                  
+                  <div className={styles.controlGroup}>
+                    <label className={styles.label}>
+                      <div className={styles.controlLabelWithToggle}>
+                        <span>Fill Color</span>
+                        <label className={styles.switch}>
+                          <input
+                            type="checkbox"
+                            checked={drawingOptions.fillEnabled}
+                            onChange={(e) => {
+                              const isEnabled = e.target.checked;
+                              setDrawingOptions({
+                                ...drawingOptions,
+                                fillEnabled: isEnabled,
+                                fill: isEnabled ? drawingOptions.fill : 'transparent'
+                              });
+                            }}
+                          />
+                          <span className={styles.slider}></span>
+                        </label>
+                      </div>
+                      <input
+                        type="color"
+                        value={drawingOptions.fill === 'transparent' ? '#ffffff' : drawingOptions.fill}
+                        onChange={(e) => setDrawingOptions({
+                          ...drawingOptions,
+                          fill: drawingOptions.fillEnabled ? e.target.value : 'transparent'
+                        })}
+                        disabled={!drawingOptions.fillEnabled}
+                        className={styles.colorInput}
+                      />
+                    </label>
+                  </div>
+                  
+                  <div className={styles.controlGroup}>
+                    <label className={styles.label}>
+                      <span className={styles.controlLabel}>Stroke Width</span>
+                      <input
+                        type="range"
+                        value={drawingOptions.width}
+                        onChange={(e) => setDrawingOptions({...drawingOptions, width: parseInt(e.target.value)})}
+                        min="1"
+                        max="20"
+                        className={styles.rangeInput}
+                      />
+                      <span className={styles.valueDisplay}>{drawingOptions.width}px</span>
+                    </label>
+                  </div>
+                  
+                  <div className={styles.controlGroup}>
+                    <label className={styles.label}>
+                      <span className={styles.controlLabel}>Opacity</span>
+                      <input
+                        type="range"
+                        value={drawingOptions.opacity}
+                        onChange={(e) => setDrawingOptions({...drawingOptions, opacity: parseFloat(e.target.value)})}
+                        min="0.1"
+                        max="1"
+                        step="0.1"
+                        className={styles.rangeInput}
+                      />
+                      <span className={styles.valueDisplay}>{Math.round(drawingOptions.opacity * 100)}%</span>
+                    </label>
+                  </div>
+                </div>
+                
+                {/* Shape selection icons */}
+                <div className={styles.shapeGrid}>
+                  <button 
+                    onClick={() => addShape('rect')} 
+                    className={`${styles.shapeButton} ${currentShapeType === 'rect' && isDrawingShape ? styles.activeShape : ''}`}
+                    title="Rectangle"
+                    disabled={isDrawingShape}
+                  >
+                    <FaRegSquare />
+                  </button>
+                  <button 
+                    onClick={() => addShape('square')} 
+                    className={`${styles.shapeButton} ${currentShapeType === 'square' && isDrawingShape ? styles.activeShape : ''}`}
+                    title="Square"
+                    disabled={isDrawingShape}
+                  >
+                    <FaSquare />
+                  </button>
+                  <button 
+                    onClick={() => addShape('circle')} 
+                    className={`${styles.shapeButton} ${currentShapeType === 'circle' && isDrawingShape ? styles.activeShape : ''}`}
+                    title="Circle"
+                    disabled={isDrawingShape}
+                  >
+                    <FaRegCircle />
+                  </button>
+                  <button 
+                    onClick={() => addShape('ellipse')} 
+                    className={`${styles.shapeButton} ${currentShapeType === 'ellipse' && isDrawingShape ? styles.activeShape : ''}`}
+                    title="Ellipse"
+                    disabled={isDrawingShape}
+                  >
+                    <FaCircle />
+                  </button>
+                  <button 
+                    onClick={() => addShape('triangle')} 
+                    className={`${styles.shapeButton} ${currentShapeType === 'triangle' && isDrawingShape ? styles.activeShape : ''}`}
+                    title="Triangle"
+                    disabled={isDrawingShape}
+                  >
+                    <div className={styles.triangleIcon}></div>
+                  </button>
+                  <button 
+                    onClick={() => addShape('arrow')} 
+                    className={`${styles.shapeButton} ${currentShapeType === 'arrow' && isDrawingShape ? styles.activeShape : ''}`}
+                    title="Arrow"
+                    disabled={isDrawingShape}
+                  >
+                    <FaLongArrowAltRight />
+                  </button>
+                  <button 
+                    onClick={() => addShape('line')} 
+                    className={`${styles.shapeButton} ${currentShapeType === 'line' && isDrawingShape ? styles.activeShape : ''}`}
+                    title="Line"
+                    disabled={isDrawingShape}
+                  >
+                    <div className={styles.lineIcon}></div>
+                  </button>
+                  <button 
+                    onClick={() => addShape('star')} 
+                    className={`${styles.shapeButton} ${currentShapeType === 'star' && isDrawingShape ? styles.activeShape : ''}`}
+                    title="Star"
+                    disabled={isDrawingShape}
+                  >
+                    <FaRegStar />
+                  </button>
+                  <button 
+                    onClick={() => addShape('heart')} 
+                    className={`${styles.shapeButton} ${currentShapeType === 'heart' && isDrawingShape ? styles.activeShape : ''}`}
+                    title="Heart"
+                    disabled={isDrawingShape}
+                  >
+                    <FaHeart />
+                  </button>
+                </div>
+                
+                {/* Apply styles to selected shape */}
+                <div className={styles.applyContainer}>
+                  <button 
+                    onClick={applyStylesToSelected}
+                    className={styles.applyButton}
+                    disabled={isDrawingShape}
+                  >
+                    <FaPalette className={styles.buttonIcon} />
+                    <span>Apply Style</span>
+                  </button>
+                  
+                  <button 
+                    onClick={() => {
+                      const activeObject = fabricCanvas.current.getActiveObject();
+                      if (activeObject) {
+                        // Create a clone of the selected object
+                        activeObject.clone((cloned) => {
+                          cloned.set({
+                            left: activeObject.left + 20,
+                            top: activeObject.top + 20
+                          });
+                          fabricCanvas.current.add(cloned);
+                          fabricCanvas.current.setActiveObject(cloned);
+                          fabricCanvas.current.renderAll();
+                          addToUndoStack();
+                        });
+                      }
+                    }}
+                    className={styles.applyButton}
+                  >
+                    <FaClone className={styles.buttonIcon} />
+                    <span>Duplicate</span>
+                  </button>
                 </div>
               </div>
             )}
+            
+            {/* Layers Panel */}
+            <div className={styles.sidebarSection}>
+              <div className={styles.sectionHeader}>
+                <h3 className={styles.sidebarTitle}>Layers</h3>
+                <button
+                  onClick={() => setShowLayers(!showLayers)}
+                  className={styles.toggleButton}
+                >
+                  {showLayers ? '▼' : '►'}
+                </button>
+              </div>
+              
+              {showLayers && (
+                <div className={styles.layersPanel}>
+                  <div className={styles.layerControls}>
+                    <button
+                      onClick={addLayer}
+                      className={styles.layerButton}
+                      title="Add Layer"
+                    >
+                      <FaPlus size={12} />
+                    </button>
+                  </div>
+                  
+                  <div className={styles.layersList}>
+                    {layers.map((layer, index) => (
+                      <div
+                        key={`layer-${index}`}
+                        className={`${styles.layerItem} ${index === activeLayerIndex ? styles.activeLayer : ''}`}
+                        onClick={() => setActiveLayerIndex(index)}
+                      >
+                        <div className={styles.layerVisibility}>
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              toggleLayerVisibility(index);
+                            }}
+                            className={styles.layerToggle}
+                            title={layer.visible ? "Hide Layer" : "Show Layer"}
+                          >
+                            {layer.visible ? '👁️' : '👁️‍🗨️'}
+                          </button>
+                        </div>
+                        
+                        <div className={styles.layerName}>
+                          <input
+                            type="text"
+                            value={layer.name}
+                            onChange={(e) => renameLayer(index, e.target.value)}
+                            onClick={(e) => e.stopPropagation()}
+                            className={styles.layerNameInput}
+                          />
+                        </div>
+                        
+                        <div className={styles.layerActions}>
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              toggleLayerLock(index);
+                            }}
+                            className={styles.layerActionButton}
+                            title={layer.locked ? "Unlock Layer" : "Lock Layer"}
+                          >
+                            {layer.locked ? '🔒' : '🔓'}
+                          </button>
+                          
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              deleteLayer(index);
+                            }}
+                            className={styles.layerActionButton}
+                            title="Delete Layer"
+                            disabled={layers.length <= 1}
+                          >
+                            ×
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
             
             {activeToolMode === 'stamp' && (
               <div className={styles.sidebarSection}>
@@ -1262,47 +2696,42 @@ const PDFEditor = () => {
             )}
           </div>
           
-          {/* Canvas area */}
+          {/* Canvas area - give it more space */}
           <div className={styles.canvasContainer} ref={containerRef}>
-            <div 
-              className={styles.canvasWrapper}
-              onClick={handleCanvasClick}
-            >
-              {/* PDF Rendering Canvas */}
-              <canvas 
-                ref={canvasRef} 
-                className={styles.pdfCanvas} 
-              />
-              
-              {/* If we have a rendered page image, display it as a fallback */}
-              {pdfPageImages[currentPage - 1]?.url && (
-                <div 
-                  className={styles.pdfImageFallback}
-                  style={{
-                    backgroundImage: `url(${pdfPageImages[currentPage - 1].url})`,
-                    width: pdfPageImages[currentPage - 1].width,
-                    height: pdfPageImages[currentPage - 1].height,
-                    position: 'absolute',
-                    top: 0,
-                    left: 0,
-                    zIndex: 1
-                  }}
+            {!pdfDoc && (
+              <div className="text-center p-10 bg-white rounded-lg shadow-lg max-w-lg mx-auto">
+                <h3 className="text-2xl font-bold mb-4">Upload a PDF to Edit</h3>
+                <p className="mb-6 text-gray-600">
+                  Use the "Open PDF" button to upload a document and start editing.
+                </p>
+                <button
+                  onClick={() => fileInputRef.current.click()}
+                  className="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+                >
+                  <FaUpload className="inline-block mr-2" />
+                  Choose a PDF
+                </button>
+              </div>
+            )}
+            
+            {pdfDoc && (
+              <div 
+                className={styles.canvasWrapper}
+                onClick={handleCanvasClick}
+              >
+                {/* PDF Rendering Canvas */}
+                <canvas 
+                  ref={canvasRef} 
+                  className={styles.pdfCanvas} 
                 />
-              )}
-              
-              {/* Overlay Canvas for Fabric.js */}
-              <canvas 
-                ref={overlayCanvasRef} 
-                className={styles.overlayCanvas}
-                style={{
-                  position: 'absolute',
-                  top: 0,
-                  left: 0,
-                  zIndex: 2,
-                  pointerEvents: 'auto'
-                }}
-              />
-            </div>
+                
+                {/* Overlay Canvas for Fabric.js */}
+                <canvas 
+                  ref={overlayCanvasRef} 
+                  className={styles.overlayCanvas}
+                />
+              </div>
+            )}
           </div>
         </div>
         

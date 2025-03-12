@@ -231,7 +231,7 @@ const PDFEditor = () => {
         const pageImages = [];
         for (let i = 1; i <= pageCount; i++) {
           const page = await pdf.getPage(i);
-          const viewport = page.getViewport({ scale: 1.0 });
+          const viewport = page.getViewport({ scale: 1 });
           
           // Create an off-screen canvas for this page
           const canvas = document.createElement('canvas');

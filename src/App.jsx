@@ -62,6 +62,12 @@ const App = () => {
       return <HomePage onToolSelect={handleToolSelect} />;
     }
 
+    // Handle category views
+    if (selectedTool.startsWith('category-')) {
+      const category = selectedTool.replace('category-', '');
+      return <HomePage category={category} onToolSelect={handleToolSelect} />;
+    }
+
     // Add the PDFCompressor tool
     if (selectedTool === 'pdf-compressor') {
       return <PDFCompressor />;
