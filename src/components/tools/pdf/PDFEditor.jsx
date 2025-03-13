@@ -1,3 +1,54 @@
+/**
+ * ==========================================================================
+ * ORIGINAL MONOLITHIC PDF EDITOR COMPONENT (DEPRECATED)
+ * ==========================================================================
+ * 
+ * ⚠️ IMPORTANT: This is the original large PDFEditor component (~4,000 lines).
+ * It has been REFACTORED into smaller components (see below), but is kept for:
+ * 
+ * 1. BACKWARD COMPATIBILITY: Existing code still works
+ * 2. GRADUAL MIGRATION: Allows for transition period
+ * 3. COMPARISON TESTING: Can compare old vs. new versions
+ * 
+ * ==========================================================================
+ * HOW TO USE THE REFACTORED VERSION INSTEAD:
+ * ==========================================================================
+ * 
+ * Instead of:
+ *   import PDFEditor from 'src/components/tools/pdf/PDFEditor';
+ * 
+ * Use:
+ *   import PDFEditorWrapper from 'src/components/tools/pdf';
+ *   // OR
+ *   import { PDFEditor as NewPDFEditor } from 'src/components/tools/pdf';
+ * 
+ * ==========================================================================
+ * REFACTORED STRUCTURE OVERVIEW:
+ * ==========================================================================
+ * 
+ * The functionality of this file has been split into:
+ * 
+ * 1. COMPONENTS (Each under 500 lines):
+ *    - PDFEditor.jsx (main orchestration component)
+ *    - ErrorBoundary.jsx
+ *    - LayerManager.jsx
+ *    - PageNavigation.jsx
+ *    - SettingsPanel.jsx
+ *    - TextEditor.jsx
+ *    - Toolbar.jsx
+ * 
+ * 2. HOOKS (Reusable logic):
+ *    - usePdfDocument.js - PDF loading & rendering
+ *    - useFabricCanvas.js - Canvas operations
+ *    - useUndoRedo.js - History management
+ * 
+ * 3. UTILITIES:
+ *    - constants.js - Shared constants and defaults
+ * 
+ * See README.md for complete documentation.
+ * ==========================================================================
+ */
+
 import React, { useState, useRef, useEffect, Component } from 'react';
 import { fabric } from 'fabric-pure-browser';
 import { PDFDocument, rgb, StandardFonts } from 'pdf-lib';
@@ -11,12 +62,15 @@ import { FaEdit, FaImage, FaSignature, FaDrawPolygon, FaHighlighter,
 import styles from './PDFEditor.module.css';
 
 // Set the worker source to a CDN-hosted file
-// This is the most reliable way to load the worker in Vite
 const PDFJS_VERSION = '3.11.174';
 const PDFJS_WORKER_URL = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${PDFJS_VERSION}/pdf.worker.min.js`;
+const PDFJS_LIB_URL = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${PDFJS_VERSION}/pdf.min.js`;
 
-// Initialize PDF.js worker
-pdfjsLib.GlobalWorkerOptions.workerSrc = PDFJS_WORKER_URL;
+// Initialize PDF.js globally
+if (typeof window !== 'undefined') {
+  window.pdfjsLib = pdfjsLib;
+  window.pdfjsLib.GlobalWorkerOptions.workerSrc = PDFJS_WORKER_URL;
+}
 
 // Error Boundary Component
 class ErrorBoundary extends Component {
@@ -71,7 +125,7 @@ class ErrorBoundary extends Component {
  * - Page management
  */
 const PDFEditor = () => {
-  // State for PDF document
+  // State declarations
   const [pdfDoc, setPdfDoc] = useState(null);
   const [pdfFile, setPdfFile] = useState(null);
   const [pdfName, setPdfName] = useState('');
@@ -80,13 +134,25 @@ const PDFEditor = () => {
   const [currentPage, setCurrentPage] = useState(1);
   const [renderedPage, setRenderedPage] = useState(null);
   const [pdfPageImages, setPdfPageImages] = useState([]);
-  
-  // State for UI
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState(null);
   const [scale, setScale] = useState(1.0);
   const [rotation, setRotation] = useState(0);
   const [activeToolMode, setActiveToolMode] = useState('cursor');
+  
+  // Create refs for values that need to be accessed in async functions
+  // This ensures we always have access to the latest value
+  const scaleRef = useRef(1.0);
+  const rotationRef = useRef(0);
+  
+  // Keep the ref in sync with the state
+  useEffect(() => {
+    scaleRef.current = scale;
+  }, [scale]);
+  
+  useEffect(() => {
+    rotationRef.current = rotation;
+  }, [rotation]);
   
   // State for editing
   const [undoStack, setUndoStack] = useState([]);
@@ -124,6 +190,10 @@ const PDFEditor = () => {
   const containerRef = useRef(null);
   const fileInputRef = useRef(null);
   const ocrWorker = useRef(null);
+  const resizeTimeoutRef = useRef(null);
+  const renderingLockRef = useRef(false); // Add a lock to prevent concurrent render operations
+  const renderTaskRef = useRef(null); // Store render task reference directly in a ref
+  const canvasWrapperRef = useRef(null);
   
   // State for editor tools and modes
   const [textContent, setTextContent] = useState('');
@@ -170,7 +240,13 @@ const PDFEditor = () => {
   const [sidebarVisible, setSidebarVisible] = useState(true);
   
   // Add state for layers
-  const [layers, setLayers] = useState([]);
+  const [layers, setLayers] = useState([{
+    id: 'default-layer',
+    name: 'Default Layer',
+    visible: true,
+    locked: false,
+    objects: []
+  }]);
   const [activeLayerIndex, setActiveLayerIndex] = useState(0);
   const [showLayers, setShowLayers] = useState(false);
 
@@ -179,6 +255,137 @@ const PDFEditor = () => {
   const [currentShapeType, setCurrentShapeType] = useState(null);
   const [drawStartPoint, setDrawStartPoint] = useState({ x: 0, y: 0 });
   const [tempShapeObj, setTempShapeObj] = useState(null);
+
+  // Add state for selected object
+  const [selectedObject, setSelectedObject] = useState(null);
+
+  // State for text editor popup
+  const [textEditorVisible, setTextEditorVisible] = useState(false);
+  const [textEditorPosition, setTextEditorPosition] = useState({ x: 0, y: 0 });
+  const [currentEditingText, setCurrentEditingText] = useState(null);
+  
+  // Function to show the text editor popup
+  const showTextEditor = (textObj, position) => {
+    try {
+      if (!textObj) return;
+      
+      console.log("Showing text editor for object:", textObj.id);
+      
+      // Store the text object reference
+      setCurrentEditingText(textObj);
+      
+      // Calculate position for the editor - position it near but not over the text
+      const editorX = position ? position.x : textObj.left;
+      const editorY = position ? position.y - 120 : textObj.top - 120;
+      
+      // Make sure it's within the viewport
+      setTextEditorPosition({
+        x: Math.max(10, editorX),
+        y: Math.max(50, editorY)
+      });
+      
+      // Show the editor
+      setTextEditorVisible(true);
+      
+      // Select all text in the object
+      if (textObj.isEditing) {
+        textObj.selectAll();
+      }
+    } catch (error) {
+      console.error("Error showing text editor:", error);
+    }
+  };
+  
+  // Function to apply text formatting changes
+  const applyTextFormatting = (property, value) => {
+    try {
+      if (!currentEditingText || !fabricCanvas.current) return;
+      
+      console.log(`Applying ${property}: ${value} to text`);
+      
+      // Update the object property
+      switch (property) {
+        case 'fontFamily':
+          currentEditingText.set('fontFamily', value);
+          break;
+        case 'fontSize':
+          currentEditingText.set('fontSize', parseInt(value, 10));
+          break;
+        case 'fill': // text color
+          currentEditingText.set('fill', value);
+          break;
+        case 'backgroundColor':
+          currentEditingText.set('backgroundColor', value === 'transparent' ? '' : value);
+          break;
+        case 'fontWeight':
+          currentEditingText.set('fontWeight', value);
+          break;
+        case 'fontStyle':
+          currentEditingText.set('fontStyle', value);
+          break;
+        case 'textAlign':
+          currentEditingText.set('textAlign', value);
+          break;
+        case 'underline':
+          currentEditingText.set('underline', value);
+          break;
+        default:
+          console.warn(`Unknown property: ${property}`);
+          return;
+      }
+      
+      // Update the text options state
+      setTextOptions(prev => ({
+        ...prev,
+        [property === 'fill' ? 'color' : property]: value
+      }));
+      
+      // Render the changes
+      fabricCanvas.current.renderAll();
+      
+      // Add to undo stack
+      addToUndoStack();
+    } catch (error) {
+      console.error(`Error applying ${property}:`, error);
+    }
+  };
+  
+  // Function to close the text editor
+  const closeTextEditor = () => {
+    setTextEditorVisible(false);
+    setCurrentEditingText(null);
+  };
+
+  // Initialize PDF.js library
+  useEffect(() => {
+    const loadPdfJS = async () => {
+      try {
+        if (!window.pdfjsLib) {
+          console.log('Initializing PDF.js...');
+          
+          // First ensure the worker URL is set
+          pdfjsLib.GlobalWorkerOptions.workerSrc = PDFJS_WORKER_URL;
+          
+          // Make pdfjsLib available globally
+          window.pdfjsLib = pdfjsLib;
+        }
+      } catch (error) {
+        console.error("Error initializing PDF.js:", error);
+        setError('Failed to initialize PDF viewer. Please refresh the page and try again.');
+      }
+    };
+    
+    loadPdfJS();
+    
+    // Cleanup on unmount
+    return () => {
+      // Dispose of any fabric canvas
+      if (fabricCanvas.current) {
+        fabricCanvas.current.dispose();
+        fabricCanvas.current = null;
+      }
+    };
+  }, []);
 
   // Initialize with a default layer
   useEffect(() => {
@@ -233,45 +440,93 @@ const PDFEditor = () => {
 
   // Function to toggle layer visibility
   const toggleLayerVisibility = (index) => {
+    if (index < 0 || index >= layers.length) {
+      console.error("Invalid layer index:", index);
+      return;
+    }
+    
+    try {
     setLayers(prev => {
       const newLayers = [...prev];
       newLayers[index].visible = !newLayers[index].visible;
       
-      // Update fabric objects visibility
+        // Update fabric objects visibility - safely
       if (fabricCanvas.current) {
-        newLayers[index].objects.forEach(objId => {
-          const obj = fabricCanvas.current.getObjects().find(o => o.id === objId);
-          if (obj) {
+          // Check if the objects array exists for this layer
+          const layerObjects = newLayers[index].objects || [];
+          
+          // Get all canvas objects
+          const canvasObjects = fabricCanvas.current.getObjects();
+          
+          // For each canvas object, check if it belongs to this layer
+          canvasObjects.forEach(obj => {
+            if (obj && obj.id && layerObjects.includes(obj.id)) {
             obj.visible = newLayers[index].visible;
           }
         });
+          
         fabricCanvas.current.renderAll();
       }
       
       return newLayers;
     });
+    } catch (error) {
+      console.error("Error toggling layer visibility:", error);
+    }
   };
 
   // Function to toggle layer lock
   const toggleLayerLock = (index) => {
+    if (index < 0 || index >= layers.length) {
+      console.error("Invalid layer index:", index);
+      return;
+    }
+    
+    try {
     setLayers(prev => {
       const newLayers = [...prev];
       newLayers[index].locked = !newLayers[index].locked;
       
-      // Update fabric objects selectable property
+        // Update fabric objects selectable property - safely
       if (fabricCanvas.current) {
-        newLayers[index].objects.forEach(objId => {
-          const obj = fabricCanvas.current.getObjects().find(o => o.id === objId);
-          if (obj) {
+          // Check if the objects array exists for this layer
+          const layerObjects = newLayers[index].objects || [];
+          
+          // Get all canvas objects
+          const canvasObjects = fabricCanvas.current.getObjects();
+          
+          // For each canvas object, check if it belongs to this layer
+          canvasObjects.forEach(obj => {
+            if (obj && obj.id && layerObjects.includes(obj.id)) {
             obj.selectable = !newLayers[index].locked;
             obj.evented = !newLayers[index].locked;
           }
         });
+          
+          // If some locked objects were selected, deselect them
+          if (newLayers[index].locked) {
+            const activeObjects = fabricCanvas.current.getActiveObjects();
+            let shouldClearSelection = false;
+            
+            activeObjects.forEach(obj => {
+              if (obj && obj.id && layerObjects.includes(obj.id)) {
+                shouldClearSelection = true;
+              }
+            });
+            
+            if (shouldClearSelection) {
+              fabricCanvas.current.discardActiveObject();
+            }
+          }
+          
         fabricCanvas.current.renderAll();
       }
       
       return newLayers;
     });
+    } catch (error) {
+      console.error("Error toggling layer lock:", error);
+    }
   };
 
   // Function to rename a layer
@@ -295,8 +550,8 @@ const PDFEditor = () => {
         canvas.wrapperEl.style.height = '100%';
         canvas.wrapperEl.style.top = '0';
         canvas.wrapperEl.style.left = '0';
-        canvas.wrapperEl.style.transform = 'none';
-        canvas.wrapperEl.style.transformOrigin = '0 0';
+        canvas.wrapperEl.style.transform = '';
+        canvas.wrapperEl.style.transformOrigin = '';
         canvas.wrapperEl.classList.add(styles.fabricWrapper);
       }
       
@@ -305,8 +560,8 @@ const PDFEditor = () => {
         canvas.lowerCanvasEl.style.position = 'absolute';
         canvas.lowerCanvasEl.style.top = '0';
         canvas.lowerCanvasEl.style.left = '0';
-        canvas.lowerCanvasEl.style.transform = 'none';
-        canvas.lowerCanvasEl.style.transformOrigin = '0 0';
+        canvas.lowerCanvasEl.style.transform = '';
+        canvas.lowerCanvasEl.style.transformOrigin = '';
       }
       
       // Fix upper canvas
@@ -314,33 +569,18 @@ const PDFEditor = () => {
         canvas.upperCanvasEl.style.position = 'absolute';
         canvas.upperCanvasEl.style.top = '0';
         canvas.upperCanvasEl.style.left = '0';
-        canvas.upperCanvasEl.style.transform = 'none';
-        canvas.upperCanvasEl.style.transformOrigin = '0 0';
+        canvas.upperCanvasEl.style.transform = '';
+        canvas.upperCanvasEl.style.transformOrigin = '';
       }
       
-      // Ensure any additional divs don't interfere with layout
+      // Remove any additional container divs that Fabric.js might have created
       const parentNode = canvas.wrapperEl?.parentNode;
       if (parentNode) {
-        const childNodes = parentNode.childNodes;
-        for (let i = 0; i < childNodes.length; i++) {
-          const child = childNodes[i];
-          if (child.nodeType === 1 && child !== canvas.wrapperEl && child !== canvasRef.current) {
-            // Check if this is an extra div created by Fabric.js
-            if (child.classList.contains('canvas-container') || 
-                child.style.position === 'relative' || 
-                child.style.width === canvas.width + 'px') {
-              
-              // Remove any transform or scaling
-              child.style.transform = 'none';
-              child.style.transformOrigin = '0 0';
-              child.style.position = 'absolute';
-              child.style.top = '0';
-              child.style.left = '0';
-              child.style.width = '100%';
-              child.style.height = '100%';
-            }
+        Array.from(parentNode.children).forEach(child => {
+          if (child !== canvas.wrapperEl && child !== canvasRef.current) {
+            parentNode.removeChild(child);
           }
-        }
+        });
       }
       
       // Force a re-render of the canvas
@@ -356,7 +596,19 @@ const PDFEditor = () => {
     // Only initialize when the canvas element is available and we have a PDF loaded
     if (overlayCanvasRef.current && !fabricCanvas.current && pdfPageImages.length > 0) {
       try {
-        // Create a new Fabric.js canvas with options to control container behavior
+        console.log("Initializing Fabric.js canvas...");
+        
+        // Safety check - verify fabric is available
+        if (typeof fabric === 'undefined') {
+          throw new Error("Fabric library is not available");
+        }
+        
+        // Additional safety check - verify required fabric components exist
+        if (!fabric.Canvas || typeof fabric.Canvas !== 'function') {
+          throw new Error("Fabric.Canvas is not a valid constructor");
+        }
+        
+        // Create the Fabric canvas with proper configuration
         const canvas = new fabric.Canvas(overlayCanvasRef.current, {
           isDrawingMode: false,
           selection: true,
@@ -365,58 +617,238 @@ const PDFEditor = () => {
           preserveObjectStacking: true,
           stopContextMenu: true,
           fireRightClick: true,
-          // Prevent Fabric.js from modifying the canvas container style
-          enableRetinaScaling: false,
+          enableRetinaScaling: true, // Enable for high DPI displays
           renderOnAddRemove: true,
-          controlsAboveOverlay: true
+          controlsAboveOverlay: true,
+          backgroundColor: 'rgba(0,0,0,0)', // Make canvas background transparent
+          stateful: false // Try disabling stateful to prevent save() methods from being called
         });
         
-        // Store the canvas in the ref
+        // Verify the canvas was created properly
+        if (!canvas || typeof canvas.add !== 'function' || typeof canvas.renderAll !== 'function') {
+          throw new Error("Fabric canvas was not initialized correctly");
+        }
+        
+        // Store the canvas reference after validation
         fabricCanvas.current = canvas;
         
-        // Clean up any extra styling that Fabric.js may have applied to containers
+        // Add a custom class to the canvas container to make it easier to find
+        try {
+          // The canvas container is the parent element of the lower canvas
+          const canvasContainer = canvas.lowerCanvasEl.parentNode;
+          if (canvasContainer) {
+            canvasContainer.classList.add('pdf-editor-canvas-container');
+            console.log("Added custom class to canvas container for easier selection");
+          }
+        } catch (classError) {
+          console.error("Could not add class to canvas container:", classError);
+        }
+        
+        // Safe render method for the canvas
+        const safeRender = (canvasObj) => {
+          try {
+            if (canvasObj && typeof canvasObj.renderAll === 'function') {
+              canvasObj.renderAll();
+            }
+          } catch (renderError) {
+            console.error("Error in safe render:", renderError);
+          }
+        };
+        
+        // Override the renderAll method with our safe version
+        const originalRenderAll = canvas.renderAll;
+        canvas.renderAll = function() {
+          try {
+            return originalRenderAll.apply(this, arguments);
+          } catch (error) {
+            console.error("Error in renderAll, using fallback:", error);
+            // Try to render without calling save()
+            try {
+              canvas.requestRenderAll();
+            } catch (fallbackError) {
+              console.error("Fallback render also failed:", fallbackError);
+            }
+          }
+        };
+        
+        // Clean up canvas container
         cleanupFabricContainer(canvas);
         
-        // Apply cleanup after a small delay to ensure all Fabric.js initialization is complete
-        setTimeout(() => {
-          cleanupFabricContainer(canvas);
-        }, 100);
+        // Set up event listeners - with try/catch for each to prevent cascading failures
+        try {
+          canvas.on('object:modified', (e) => {
+            try {
+              handleObjectModified(e);
+            } catch (error) {
+              console.error("Error in object:modified handler:", error);
+            }
+          });
+        } catch (error) {
+          console.error("Failed to set up object:modified listener:", error);
+        }
         
-        // Set up event listeners
-        canvas.on('object:modified', handleObjectModified);
-        canvas.on('path:created', handlePathCreated);
+        try {
+          canvas.on('path:created', (e) => {
+            try {
+              handlePathCreated(e);
+            } catch (error) {
+              console.error("Error in path:created handler:", error);
+            }
+          });
+        } catch (error) {
+          console.error("Failed to set up path:created listener:", error);
+        }
+        
+        try {
+          canvas.on('mouse:down', (e) => {
+            try {
+              // This is critical for handling all mouse interactions properly
+              // Only process clicks when not in drawing mode and not already selecting an object
+              if (!canvas.isDrawingMode && !canvas.getActiveObject() && !isDrawingShape) {
+                handleCanvasClick(e);
+              }
+            } catch (error) {
+              console.error("Error in mouse:down handler:", error);
+            }
+          });
+        } catch (error) {
+          console.error("Failed to set up mouse:down listener:", error);
+        }
+        
+        try {
         canvas.on('selection:created', (e) => {
+            try {
           // When a text object is selected, update the text options
           if (e.selected && e.selected[0] && e.selected[0].type === 'i-text') {
             const selectedText = e.selected[0];
             setTextOptions({
-              font: selectedText.fontFamily,
-              size: selectedText.fontSize,
-              color: selectedText.fill,
+                  font: selectedText.fontFamily || 'Helvetica',
+                  size: selectedText.fontSize || 16,
+                  color: selectedText.fill || '#000000',
               backgroundColor: selectedText.backgroundColor,
               fontWeight: selectedText.fontWeight || 'normal',
               fontStyle: selectedText.fontStyle || 'normal'
             });
-          }
-        });
-        
-        // Initialize drawing brush - only if the canvas is properly initialized
-        if (canvas.freeDrawingBrush) {
-          canvas.freeDrawingBrush.color = drawingOptions.color;
-          canvas.freeDrawingBrush.width = drawingOptions.width;
+              } else if (e.selected && e.selected[0]) {
+                // For other object types, update the drawing options if they have the right properties
+                const obj = e.selected[0];
+                const newOptions = { ...drawingOptions };
+                
+                if (obj.stroke) newOptions.color = obj.stroke;
+                if (obj.strokeWidth) newOptions.width = obj.strokeWidth;
+                if (obj.opacity) newOptions.opacity = obj.opacity;
+                if (obj.fill && obj.fill !== 'transparent') {
+                  newOptions.fill = obj.fill;
+                  newOptions.fillEnabled = true;
+                }
+                
+                setDrawingOptions(newOptions);
+                setSelectedObject(obj);
+              }
+            } catch (error) {
+              console.error("Error in selection:created handler:", error);
+            }
+          });
+        } catch (error) {
+          console.error("Failed to set up selection:created listener:", error);
         }
         
+        try {
+          canvas.on('selection:cleared', () => {
+            try {
+              setSelectedObject(null);
+            } catch (error) {
+              console.error("Error in selection:cleared handler:", error);
+            }
+          });
+        } catch (error) {
+          console.error("Failed to set up selection:cleared listener:", error);
+        }
+        
+        // Special handler for text tool - capture clicks directly on the canvas element
+        const addTextToolClickHandler = () => {
+          if (canvas.upperCanvasEl) {
+            const textHandler = (mouseEvent) => {
+              try {
+                // Only process if the text tool is active and no object is selected
+                if (activeToolMode === 'text' && !canvas.getActiveObject()) {
+                  // Log the native event for debugging
+                  console.log("Text tool direct click detected:", 
+                             mouseEvent.clientX, mouseEvent.clientY);
+                  
+                  // Get click position with bounds checking
+                  const rect = canvas.upperCanvasEl.getBoundingClientRect();
+                  
+                  // Verify we have valid coordinates
+                  if (!rect || typeof mouseEvent.clientX !== 'number' || typeof mouseEvent.clientY !== 'number') {
+                    console.error("Invalid coordinates or canvas rectangle");
+                    return;
+                  }
+                  
+                  // Calculate position relative to canvas
+                  const x = mouseEvent.clientX - rect.left;
+                  const y = mouseEvent.clientY - rect.top;
+                  
+                  // Make sure coordinates are valid numbers
+                  if (isNaN(x) || isNaN(y)) {
+                    console.error("Got NaN coordinates:", x, y);
+                    return;
+                  }
+                  
+                  // Create synthetic fabric event with explicit pointer property
+                  const fabricEvent = {
+                    e: mouseEvent,
+                    target: null,
+                    pointer: { x, y },
+                    clientX: mouseEvent.clientX,
+                    clientY: mouseEvent.clientY
+                  };
+                  
+                  // Process the click for text tool
+                  console.log("Direct text tool click at", x, y);
+                  handleCanvasClick(fabricEvent);
+                }
+              } catch (textClickError) {
+                console.error("Error handling text tool click:", textClickError);
+              }
+            };
+            
+            // Add the click handler with capture phase to handle it early
+            canvas.upperCanvasEl.addEventListener('click', textHandler, true);
+            
+            // Return cleanup function
+            return () => {
+              try {
+                if (canvas.upperCanvasEl) {
+                  canvas.upperCanvasEl.removeEventListener('click', textHandler, true);
+                }
+              } catch (error) {
+                console.error("Error removing text click handler:", error);
+              }
+            };
+          }
+          return () => {}; // Empty cleanup if handler wasn't added
+        };
+        
+        // Add the text tool handler
+        const textHandlerCleanup = addTextToolClickHandler();
+        
         // Set up keyboard shortcuts
-        document.addEventListener('keydown', (e) => {
+        const keyDownHandler = (e) => {
+          try {
           // Delete key to remove selected objects
           if (e.key === 'Delete' && canvas.getActiveObject()) {
             if (canvas.getActiveObjects().length > 0) {
               addToUndoStack();
               canvas.getActiveObjects().forEach(obj => {
+                  try {
                 canvas.remove(obj);
+                  } catch (removeError) {
+                    console.error("Error removing object:", removeError);
+                  }
               });
               canvas.discardActiveObject();
-              canvas.renderAll();
+                safeRender(canvas);
             }
           }
           
@@ -431,29 +863,142 @@ const PDFEditor = () => {
             e.preventDefault();
             handleRedo();
           }
-        });
+          } catch (keyError) {
+            console.error("Error in keyboard handler:", keyError);
+          }
+        };
         
-        console.log("Fabric.js canvas initialized");
+        // Add the keyboard event listener
+        document.addEventListener('keydown', keyDownHandler);
+        
+        // Switch to cursor mode by default
+        try {
+          // Check if there was a previously selected tool in sessionStorage
+          let initialTool = 'cursor';
+          try {
+            const savedTool = sessionStorage.getItem('pdfEditorActiveTool');
+            if (savedTool) {
+              console.log("Restoring previously selected tool:", savedTool);
+              initialTool = savedTool;
+            }
+          } catch (storageError) {
+            console.error("Error reading saved tool:", storageError);
+          }
+          
+          // Apply the selected tool - using the current value from state as backup
+          const toolToApply = initialTool || activeToolMode || 'cursor';
+          handleToolSelect(toolToApply);
+        } catch (error) {
+          console.error("Error setting initial tool mode:", error);
+          // If setting the saved tool fails, just set basic cursor properties
+          try {
+            setActiveToolMode('cursor');
+            canvas.isDrawingMode = false;
+            canvas.selection = true;
+            canvas.defaultCursor = 'default';
+            canvas.hoverCursor = 'default';
+            safeRender(canvas);
+          } catch (fallbackError) {
+            console.error("Error in fallback tool initialization:", fallbackError);
+          }
+        }
+        
+        console.log("Fabric.js canvas initialized successfully");
+        
+        // Return combined cleanup function
+        return () => {
+          // Remove keyboard event listener
+          document.removeEventListener('keydown', keyDownHandler);
+          
+          // Call text handler cleanup
+          try {
+            textHandlerCleanup();
+          } catch (error) {
+            console.error("Error in text handler cleanup:", error);
+          }
+          
+          // Clean up the canvas - SAFELY without using fabric.dispose()
+          if (fabricCanvas.current) {
+            try {
+              // Remove all event listeners
+              try {
+                fabricCanvas.current.off();
+              } catch (error) {
+                console.error("Error removing canvas event listeners:", error);
+              }
+              
+              // Remove all objects from the canvas
+              try {
+                fabricCanvas.current.clear();
+              } catch (error) {
+                console.error("Error clearing canvas objects:", error);
+              }
+              
+              // Remove canvas elements from DOM - manually instead of using dispose()
+              try {
+                const wrapperEl = fabricCanvas.current.wrapperEl;
+                if (wrapperEl && wrapperEl.parentNode) {
+                  // Save reference to parent node before removing wrapper
+                  const parentNode = wrapperEl.parentNode;
+                  
+                  // Remove wrapper from DOM directly - avoid style manipulations
+                  parentNode.removeChild(wrapperEl);
+                }
+              } catch (error) {
+                console.error("Error removing canvas from DOM:", error);
+              }
+              
+              // Clear the reference
+              fabricCanvas.current = null;
+            } catch (error) {
+              console.error("Error cleaning up fabric canvas:", error);
+            }
+          }
+        };
       } catch (error) {
         console.error("Error initializing Fabric.js canvas:", error);
+        setError(`Failed to initialize drawing canvas: ${error.message}. Please refresh the page.`);
       }
     }
     
-    // Cleanup function
+    // Default cleanup function - used if we never fully initialized
     return () => {
       if (fabricCanvas.current) {
         try {
-          // Safely dispose of the fabric canvas
-          const canvas = fabricCanvas.current;
-          canvas.off(); // Remove all event listeners
-          canvas.dispose();
+          // SAFE manual cleanup - WITHOUT using dispose()
+          
+          // Remove event listeners
+          try {
+            fabricCanvas.current.off();
+          } catch (error) {
+            console.error("Error removing canvas event listeners:", error);
+          }
+          
+          // Clear all objects
+          try {
+            fabricCanvas.current.clear();
+          } catch (error) {
+            console.error("Error clearing canvas objects:", error);
+          }
+          
+          // Manually remove from DOM
+          try {
+            const wrapperEl = fabricCanvas.current.wrapperEl;
+            if (wrapperEl && wrapperEl.parentNode) {
+              wrapperEl.parentNode.removeChild(wrapperEl);
+            }
+          } catch (error) {
+            console.error("Error removing canvas from DOM:", error);
+          }
+          
+          // Reset reference
           fabricCanvas.current = null;
         } catch (error) {
-          console.error("Error disposing fabric canvas:", error);
+          console.error("Error in canvas cleanup:", error);
         }
       }
     };
-  }, [pdfPageImages, currentPage, drawingOptions.color, drawingOptions.width]);
+  }, [pdfPageImages, currentPage, drawingOptions.color, drawingOptions.width, activeToolMode]);
   
   // Initialize OCR worker
   useEffect(() => {
@@ -531,795 +1076,1946 @@ const PDFEditor = () => {
       setIsLoading(true);
       setError(null);
       
-      // Always start with scale=1.0 (actual size) when loading a new PDF
-      // This ensures we see the document at its exact size initially
-      setScale(1.0);
-      console.log("Loading PDF at actual size (scale=1.0)");
+      // Cancel any ongoing render operations
+      if (renderTaskRef.current) {
+        try {
+          renderTaskRef.current.cancel();
+          renderTaskRef.current = null;
+        } catch (error) {
+          console.error("Error cancelling render during PDF load:", error);
+        }
+      }
       
-      console.log("Worker source:", pdfjsLib.GlobalWorkerOptions.workerSrc);
+      // Release the rendering lock
+      renderingLockRef.current = false;
       
-      // Read the file - create separate copies for PDF.js and pdf-lib
-      const fileData = await file.arrayBuffer();
+      // Always start with scale=1.0 when loading a new PDF
+      const initialScale = 1.0;
+      const initialRotation = 0;
       
-      // Create a copy of the ArrayBuffer for PDF.js
-      const pdfJsBuffer = new Uint8Array(fileData.slice(0));
+      // Update both state and refs
+      setScale(initialScale);
+      setRotation(initialRotation);
+      scaleRef.current = initialScale;
+      rotationRef.current = initialRotation;
       
-      // Create a copy of the ArrayBuffer for pdf-lib
-      const pdfLibBuffer = new Uint8Array(fileData.slice(0));
+      console.log("Initializing PDF with scale:", initialScale, "rotation:", initialRotation);
+      
+      // Read the file and create copies to prevent detached ArrayBuffer issues
+      const fileDataBuffer = await file.arrayBuffer();
+      
+      // Create separate copies for each use to prevent detached ArrayBuffer issues
+      // Using slice(0) to create a copy of the buffer - this is CRITICAL to prevent detachment
+      const pdfJsBuffer = new Uint8Array(fileDataBuffer.slice(0)).buffer;
+      const pdfLibBuffer = new Uint8Array(fileDataBuffer.slice(0)).buffer;
       
       // Load the PDF with PDF.js
       try {
-        // Use high-quality rendering options
         const loadingTask = pdfjsLib.getDocument({
           data: pdfJsBuffer,
-          cMapUrl: 'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/cmaps/',
+          cMapUrl: `https://cdn.jsdelivr.net/npm/pdfjs-dist@${PDFJS_VERSION}/cmaps/`,
           cMapPacked: true,
-          standardFontDataUrl: 'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/standard_fonts/',
-          disableFontFace: false, // Enable font rendering
-          nativeImageDecoderSupport: 'display', // Use native image decoder for better quality
-          isEvalSupported: true,
-          useSystemFonts: true, // Use system fonts for better rendering
-          useWorkerFetch: true,
-          rangeChunkSize: 65536, // Larger chunk size for better performance
-          maxImageSize: -1, // No limit on image size
-          isOffscreenCanvasSupported: true
+          standardFontDataUrl: `https://cdn.jsdelivr.net/npm/pdfjs-dist@${PDFJS_VERSION}/standard_fonts/`,
         });
-        
-        // Add an error handler to the loading task
+
+        // Track loading progress
         loadingTask.onProgress = (progress) => {
-          console.log(`Loading PDF: ${progress.loaded}/${progress.total}`);
+          if (progress.total > 0) {
+            const percent = Math.round((progress.loaded / progress.total) * 100);
+            console.log(`Loading PDF: ${percent}%`);
+          }
         };
         
         const pdf = await loadingTask.promise;
         console.log("PDF loaded successfully:", pdf);
+        
+        // Update state
         setPdfDoc(pdf);
         setPageCount(pdf.numPages);
         setCurrentPage(1);
-        
-        // Clear previous page images when loading a new PDF
         setPdfPageImages([]);
         
-        // Create PDF document with pdf-lib for later saving
-        try {
-          const pdfDoc = await PDFDocument.load(pdfLibBuffer);
+        // Reset all editing state
+        cleanupFabricCanvas();
+        
+        // Create initial layer if needed
+        setLayers([{
+          id: 'default-layer',
+          name: 'Default Layer',
+          visible: true,
+          locked: false,
+          objects: []
+        }]);
+        setActiveLayerIndex(0);
+        
+        // Create PDF document with pdf-lib for later saving - do this in parallel
+        const pdfLibPromise = PDFDocument.load(pdfLibBuffer)
+          .then(pdfDoc => {
           setPdfFile(pdfDoc);
           setPdfName(file.name);
-          
-          // Render the first page at actual size (scale=1.0)
+          })
+          .catch(pdfLibError => {
+            console.error("Error loading PDF with pdf-lib:", pdfLibError);
+            // Non-critical error, we can still proceed with viewing
+            console.log("PDF editing capabilities may be limited");
+          });
+        
+        // Wait a moment before rendering to ensure state updates are applied
+        await new Promise(resolve => setTimeout(resolve, 100));
+        
+        // Render the first page - don't wait for pdf-lib to finish
           await renderPage(pdf, 1);
           
-          setIsLoading(false);
-        } catch (pdfLibError) {
-          console.error("Error loading PDF with pdf-lib:", pdfLibError);
-          setError(`Failed to prepare PDF for editing: ${pdfLibError.message}`);
-          setIsLoading(false);
-        }
-      } catch (pdfError) {
-        console.error("Error loading PDF with PDF.js:", pdfError);
-        setError(`Failed to load PDF: ${pdfError.message}. Please try a different file.`);
-        setIsLoading(false);
+        // Log completion
+        console.log("PDF loaded and first page rendered");
         
-        // Show a user-friendly error dialog
-        alert(`Failed to load PDF: ${pdfError.message}. Please try a different file or check if the file is corrupted.`);
-      }
+        // Now wait for pdf-lib to finish
+        await pdfLibPromise;
+        
     } catch (error) {
       console.error("Error loading PDF:", error);
-      setError(`Failed to load PDF: ${error.message}`);
+        setError(`Failed to load PDF: ${error.message}. Please try a different file.`);
+      }
+    } catch (error) {
+      console.error("Error reading file:", error);
+      setError(`Failed to read file: ${error.message}`);
+    } finally {
       setIsLoading(false);
-      
-      // Show a user-friendly error dialog
-      alert(`Failed to load PDF. Please try again or check if the file is valid.`);
     }
   };
   
-  // Update the renderPage function to display at actual size by default
+  // Critical fix for the render operation error
   const renderPage = async (pdf, pageNumber) => {
+    // If we're already rendering, don't start another render
+    if (renderingLockRef.current === true) {
+      console.log("Render operation already in progress, skipping...");
+      return;
+    }
+    
+    // Set the rendering lock
+    renderingLockRef.current = true;
+    
     try {
+      // Validate input
       if (!pdf) {
         console.error("No PDF document available");
+        renderingLockRef.current = false;
         return;
       }
       
+      // Set loading state
+      setIsLoading(true);
+      
+      console.log(`Starting render of page ${pageNumber}...`);
+      
+      // First, properly cancel any ongoing render task
+      if (renderTaskRef.current) {
+        try {
+          console.log("Cancelling previous render task...");
+          renderTaskRef.current.cancel();
+          renderTaskRef.current = null;
+        } catch (error) {
+          console.error("Error cancelling previous render task:", error);
+        }
+      }
+      
+      // Clean up any old fabric canvas
+      cleanupFabricCanvas();
+      
+      // Wait for a moment to ensure previous operations are fully aborted
+      await new Promise(resolve => setTimeout(resolve, 100));
+
+      // Get the page
       const page = await pdf.getPage(pageNumber);
       
-      // Get the original page size from the PDF
-      const originalViewport = page.getViewport({ scale: 1 });
-      const pageWidth = originalViewport.width;
-      const pageHeight = originalViewport.height;
+      // Use the ref values which are always available
+      const currentScale = scaleRef.current;
+      const currentRotation = rotationRef.current;
       
-      // Check if this is likely an A4 document (A4 is approximately 595 x 842 points at 72dpi)
-      const isA4 = Math.abs(pageWidth - 595) < 30 && Math.abs(pageHeight - 842) < 30;
+      console.log(`Page ${pageNumber} retrieved. Rendering with scale=${currentScale}, rotation=${currentRotation}`);
       
-      // Instead of automatically scaling to container, use actual size (1.0 scale)
-      // We'll only apply user-defined scale if it exists
-      const initialScale = scale || 1.0; // Use 1.0 scale by default for initial render
+      // Create viewport
+      const viewport = page.getViewport({ 
+        scale: currentScale,
+        rotation: currentRotation 
+      });
       
-      // Create viewport with actual size scale
-      const viewport = page.getViewport({ scale: initialScale });
-      
-      // Get the canvas element
+      // Get canvas and validate
       const canvas = canvasRef.current;
       if (!canvas) {
         console.error("Canvas element not found");
+        renderingLockRef.current = false;
+        setIsLoading(false);
         return;
       }
-      
-      // Get device pixel ratio - use a higher value for better quality
-      // Use at least 2x for better quality, but cap at 3x to avoid performance issues
-      const pixelRatio = Math.min(Math.max(window.devicePixelRatio || 1, 2), 3);
-      
-      // Set canvas dimensions with pixel ratio for high DPI displays
-      canvas.width = viewport.width * pixelRatio;
-      canvas.height = viewport.height * pixelRatio;
-      
-      // Set display size
-      canvas.style.width = `${viewport.width}px`;
-      canvas.style.height = `${viewport.height}px`;
-      
-      // Prepare canvas for rendering with high quality settings
-      const context = canvas.getContext('2d', { alpha: false, willReadFrequently: true });
+
+      // Set canvas dimensions
+      canvas.width = viewport.width;
+      canvas.height = viewport.height;
+
+      // Get rendering context - keep this simple
+      const context = canvas.getContext('2d', { alpha: false });
       if (!context) {
         console.error("Could not get canvas context");
+        renderingLockRef.current = false;
+        setIsLoading(false);
         return;
       }
       
-      // Scale context to account for the pixel ratio
-      context.scale(pixelRatio, pixelRatio);
+      // Clear canvas and set white background
+      context.fillStyle = '#FFFFFF';
+      context.fillRect(0, 0, canvas.width, canvas.height);
       
-      // Disable image smoothing for sharper text
-      context.imageSmoothingEnabled = false;
-      context.imageSmoothingQuality = 'high';
+      // Create render task with minimal options
+      const renderContext = {
+        canvasContext: context,
+        viewport: viewport,
+        background: 'white'
+      };
       
-      console.log(`Rendering page ${pageNumber} with scale ${initialScale} and pixel ratio ${pixelRatio}`);
-      
-      // Render the page with high quality
       try {
-        // Use a higher quality rendering approach
-        const renderContext = {
-          canvasContext: context,
-          viewport: viewport,
-          enableWebGL: true,
-          renderInteractiveForms: true,
-          intent: 'print',  // Use 'print' for highest quality
-          canvasFactory: {
-            create: function(width, height) {
-              const canvas = document.createElement('canvas');
-              canvas.width = width;
-              canvas.height = height;
-              return canvas;
-            },
-            reset: function(canvasAndContext, width, height) {
-              canvasAndContext[0].width = width;
-              canvasAndContext[0].height = height;
-              return canvasAndContext;
-            },
-            destroy: function(canvasAndContext) {
-              // No need to do anything here
-            }
-          },
-          background: 'rgba(255, 255, 255, 1)'  // White background for better quality
-        };
+        // Create a new render task
+        const renderTask = page.render(renderContext);
         
-        await page.render(renderContext).promise;
+        // Store it in our ref for potential future cancellation
+        renderTaskRef.current = renderTask;
         
-        // Apply sharpening filter for better text clarity
-        applySharpening(context, viewport.width, viewport.height);
+        // Wait for rendering to complete
+        await renderTask.promise;
         
         console.log(`Page ${pageNumber} rendered successfully`);
         
-        // Store the rendered page image to prevent it from disappearing
-        // Use higher quality PNG encoding
-        const pageImage = canvas.toDataURL('image/png', 1.0);
-        setPdfPageImages(prev => {
-          const newImages = [...prev];
-          newImages[pageNumber - 1] = {
-            url: pageImage,
-            width: viewport.width,
-            height: viewport.height,
-            originalWidth: pageWidth,
-            originalHeight: pageHeight,
-            isA4: isA4
-          };
-          return newImages;
-        });
-        
-        // Set up the overlay canvas for annotations
-        const overlay = overlayCanvasRef.current;
-        if (overlay) {
-          overlay.width = viewport.width;
-          overlay.height = viewport.height;
-          
-          // Reinitialize Fabric canvas with new dimensions
-          if (fabricCanvas.current) {
-            fabricCanvas.current.setDimensions({
-              width: viewport.width,
-              height: viewport.height
-            });
-          }
-        }
-        
-        // Store the rendered page
-        setRenderedPage(pageNumber);
-        
-        // Auto-fit to width only if it's the first page being loaded
-        if (pageNumber === 1 && !scale) {
-          // Delay to ensure the canvas is ready
-          setTimeout(() => {
-            fitToWidth();
-          }, 100);
-        }
-      } catch (renderError) {
-        console.error("Error rendering page:", renderError);
-        setError(`Failed to render page ${pageNumber}: ${renderError.message}`);
-      }
-    } catch (pageError) {
-      console.error("Error getting page:", pageError);
-      setError(`Failed to get page ${pageNumber}: ${pageError.message}`);
-    }
-  };
-  
-  // Add a function to apply sharpening filter for better text clarity
-  const applySharpening = (context, width, height) => {
-    try {
-      // Get image data
-      const imageData = context.getImageData(0, 0, width, height);
-      const data = imageData.data;
-      const sharpeningFactor = 0.3; // Adjust this value for more/less sharpening
-      
-      // Apply unsharp mask filter
-      for (let y = 1; y < height - 1; y++) {
-        for (let x = 1; x < width - 1; x++) {
-          const idx = (y * width + x) * 4;
-          
-          // For each color channel (R, G, B)
-          for (let c = 0; c < 3; c++) {
-            const current = data[idx + c];
-            const neighbors = [
-              data[idx - width * 4 + c], // top
-              data[idx + width * 4 + c], // bottom
-              data[idx - 4 + c],         // left
-              data[idx + 4 + c]          // right
-            ];
-            
-            // Calculate average of neighbors
-            const avg = neighbors.reduce((sum, val) => sum + val, 0) / 4;
-            
-            // Apply sharpening
-            const diff = current - avg;
-            data[idx + c] = Math.min(255, Math.max(0, current + diff * sharpeningFactor));
-          }
-        }
-      }
-      
-      // Put the modified image data back
-      context.putImageData(imageData, 0, 0);
-    } catch (error) {
-      console.error("Error applying sharpening:", error);
-      // Continue without sharpening if there's an error
-    }
-  };
-  
-  // Handle file selection
-  const handleFileSelect = (event) => {
-    const file = event.target.files[0];
-    if (file && (file.type === 'application/pdf')) {
-      loadPDF(file);
-    } else {
-      setError('Please select a valid PDF file.');
-    }
-  };
-  
-  // Handle file drop
-  const handleDrop = (event) => {
-    event.preventDefault();
-    event.stopPropagation();
-    
-    // Get the dropped file
-    const file = event.dataTransfer.files[0];
-    if (file && file.type === 'application/pdf') {
-      loadPDF(file);
-    } else {
-      setError('Please drop a valid PDF file.');
-    }
-  };
-  
-  // Add resize event listener
-  useEffect(() => {
-    const handleResize = () => {
-      if (pdfDoc && currentPage <= pdfPageImages.length) {
-        // Add a small delay to avoid excessive redraws during resizing
-        setTimeout(() => {
-          renderCurrentPage();
-        }, 100);
-      }
-    };
-    
-    window.addEventListener('resize', handleResize);
-    
-    return () => {
-      window.removeEventListener('resize', handleResize);
-    };
-  }, [pdfDoc, currentPage, pdfPageImages, scale, rotation]);
-  
-  // Render the current page on canvas
-  useEffect(() => {
-    if (canvasRef.current && pdfPageImages.length > 0 && currentPage <= pdfPageImages.length) {
-      renderCurrentPage();
-    }
-  }, [currentPage, pdfPageImages, scale, rotation]);
-  
-  // Render the current page
-  const renderCurrentPage = () => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    
-    const context = canvas.getContext('2d', { alpha: false, willReadFrequently: true });
-    if (!context) {
-      console.error("Could not get canvas context");
-      return;
-    }
-    
-    const pageIndex = currentPage - 1;
-    
-    if (pageIndex < 0 || pageIndex >= pdfPageImages.length) {
-      console.error('Invalid page index:', pageIndex);
-      return;
-    }
-    
-    // Create an image from the stored data URL
-    const img = new Image();
-    img.onload = () => {
-      try {
-        // Safety check to ensure component is still mounted
-        if (!canvasRef.current || !containerRef.current) {
-          console.log("Component unmounted, aborting render");
+        // Only continue if we're still mounted
+        if (!canvasRef.current) {
+          console.log("Component unmounted during render, aborting post-render steps");
           return;
         }
         
-        // Get page information
-        const pageInfo = pdfPageImages[pageIndex];
-        const originalWidth = pageInfo.originalWidth || img.width;
-        const originalHeight = pageInfo.originalHeight || img.height;
-        
-        // Use actual size (1.0 scale) as the base, then apply user-defined scale
-        // No automatic container-based scaling
-        const userScale = scale || 1.0; // Default to 1.0 if scale is null
-        
-        // Calculate final dimensions
-        const scaledWidth = originalWidth * userScale;
-        const scaledHeight = originalHeight * userScale;
-        
-        // Get device pixel ratio for high-resolution displays
-        // Use at least 2x for better quality, but cap at 3x to avoid performance issues
-        const pixelRatio = Math.min(Math.max(window.devicePixelRatio || 1, 2), 3);
-        
-        // Set canvas dimensions for high-quality rendering
-        canvas.width = scaledWidth * pixelRatio;
-        canvas.height = scaledHeight * pixelRatio;
-        
-        // Set display size
-        canvas.style.width = `${scaledWidth}px`;
-        canvas.style.height = `${scaledHeight}px`;
-        
-        // Clear canvas
-        context.clearRect(0, 0, canvas.width, canvas.height);
-        
-        // Apply scaling for high DPI
-        context.scale(pixelRatio, pixelRatio);
-        
-        // Disable image smoothing for sharper text
-        context.imageSmoothingEnabled = false;
-        context.imageSmoothingQuality = 'high';
-        
-        // Save context state for rotation
-        context.save();
-        
-        // Apply rotation if needed
-        if (rotation !== 0) {
-          context.translate(scaledWidth / 2, scaledHeight / 2);
-          context.rotate((rotation * Math.PI) / 180);
-          context.translate(-scaledWidth / 2, -scaledHeight / 2);
+        // Store the rendered image
+        try {
+      const pageImage = canvas.toDataURL('image/png', 1.0);
+      setPdfPageImages(prev => {
+        const newImages = [...prev];
+        newImages[pageNumber - 1] = {
+          url: pageImage,
+              dataUrl: pageImage, // Add this for compatibility with renderCurrentPage
+          width: viewport.width,
+              height: viewport.height,
+              originalWidth: viewport.width,
+              originalHeight: viewport.height
+        };
+        return newImages;
+      });
+        } catch (imgError) {
+          console.error("Error capturing rendered page image:", imgError);
         }
-        
-        // Draw the image with high quality
-        context.drawImage(img, 0, 0, scaledWidth, scaledHeight);
-        
-        // Apply sharpening for better text clarity if zoomed in
-        if (userScale > 1.2) {
-          applySharpening(context, scaledWidth, scaledHeight);
-        }
-        
-        // Restore context state
-        context.restore();
-        
-        // Set up overlay canvas dimensions - ensure exact match with PDF canvas
-        if (overlayCanvasRef.current) {
-          overlayCanvasRef.current.width = scaledWidth;
-          overlayCanvasRef.current.height = scaledHeight;
-          
-          // Update Fabric canvas dimensions
-          if (fabricCanvas.current) {
-            fabricCanvas.current.setDimensions({
-              width: scaledWidth,
-              height: scaledHeight
-            });
-            
-            // Make sure the fabric canvas is correctly positioned
-            cleanupFabricContainer(fabricCanvas.current);
-            
-            // Render the fabric canvas to apply changes
-            fabricCanvas.current.renderAll();
+
+        // Initialize Fabric canvas - only do this after PDF rendering is fully complete
+      if (overlayCanvasRef.current) {
+          try {
+            // Only create a new fabric canvas if we don't have one
+            if (!fabricCanvas.current) {
+        const fabricCanvasOptions = {
+          isDrawingMode: false,
+          width: viewport.width,
+          height: viewport.height,
+          selection: true,
+          preserveObjectStacking: true,
+          backgroundColor: null
+        };
+
+              fabricCanvas.current = new fabric.Canvas(overlayCanvasRef.current, fabricCanvasOptions);
+              
+              // Restore objects if needed
+              if (layers && 
+                  layers.length > 0 && 
+                  activeLayerIndex >= 0 && 
+                  activeLayerIndex < layers.length && 
+                  layers[activeLayerIndex]?.objects?.length > 0) {
+                
+                layers[activeLayerIndex].objects.forEach(obj => {
+                  try {
+                    fabricCanvas.current.add(obj);
+                  } catch (objError) {
+                    console.error("Error adding object to fabric canvas:", objError);
+                  }
+                });
+              }
+            }
+          } catch (fabricError) {
+            console.error("Error initializing fabric canvas:", fabricError);
           }
         }
         
-        // Draw any annotations
-        if (typeof renderAnnotations === 'function') {
-          renderAnnotations(context);
+        // Clear the render task ref now that we're done
+        renderTaskRef.current = null;
+        
+      } catch (renderError) {
+        console.error(`Error rendering page ${pageNumber}:`, renderError);
+        setError(`Failed to render page ${pageNumber}: ${renderError.message}`);
+      }
+      
+    } catch (pageError) {
+      console.error(`General error in renderPage:`, pageError);
+      setError(`Failed to process page: ${pageError.message}`);
+    } finally {
+      // Always release the rendering lock and clear loading state
+      renderingLockRef.current = false;
+      setIsLoading(false);
+      
+      console.log(`Render operation for page ${pageNumber} completed`);
+    }
+  };
+
+  // Add a proper cleanup function for fabric canvas
+  const cleanupFabricCanvas = () => {
+      if (fabricCanvas.current) {
+      try {
+        // Save objects if needed
+        if (layers && activeLayerIndex >= 0 && activeLayerIndex < layers.length) {
+          const objects = fabricCanvas.current.getObjects();
+          setLayers(prevLayers => {
+            const newLayers = [...prevLayers];
+            if (newLayers[activeLayerIndex]) {
+              newLayers[activeLayerIndex].objects = objects;
+            }
+            return newLayers;
+          });
         }
         
-        // Ensure the PDF is visible from the top by scrolling to top
-        if (containerRef.current) {
-          containerRef.current.scrollTop = 0;
-        }
+        // Remove all event handlers
+        fabricCanvas.current.off();
         
-        // Only center horizontally if zoomed in
-        if (userScale > 1.0 && containerRef.current) {
-          const container = containerRef.current;
-          const containerWidth = container.clientWidth;
-          
-          // Center horizontally but keep at top vertically
-          if (scaledWidth > containerWidth) {
-            setTimeout(() => {
-              container.scrollLeft = (scaledWidth - containerWidth) / 2;
-            }, 50);
-          }
-        }
+        // Clear all objects
+        fabricCanvas.current.clear();
+        
+        // Dispose the canvas
+        fabricCanvas.current.dispose();
+        
+        // Clear the reference
+        fabricCanvas.current = null;
+        
+        console.log("Fabric canvas cleaned up successfully");
       } catch (error) {
-        console.error("Error rendering page:", error);
-        setError(`Failed to render page: ${error.message}`);
+        console.error("Error during fabric canvas cleanup:", error);
+      }
+    }
+  };
+
+  // Add component cleanup on unmount
+  useEffect(() => {
+    return () => {
+      // Clean up everything when component unmounts
+      cleanupFabricCanvas();
+      
+      // Clean up any other resources
+      if (ocrWorker.current) {
+        ocrWorker.current.terminate();
+        ocrWorker.current = null;
       }
     };
-    
-    img.onerror = (error) => {
-      console.error("Error loading image:", error);
-      setError("Failed to load PDF page image");
+  }, []);
+
+  // Update useEffect for page changes to use renderTaskRef
+  useEffect(() => {
+    let isMounted = true;
+
+    const loadAndRenderPage = async () => {
+      // Only proceed if the PDF document is loaded and the requested page is valid
+      if (!pdfDoc || currentPage > pageCount || !isMounted) {
+        return;
+      }
+      
+      try {
+        // Don't set loading state here as renderPage will handle it
+          await renderPage(pdfDoc, currentPage);
+        } catch (error) {
+          console.error("Error rendering page:", error);
+          if (isMounted) {
+            setError(`Failed to render page ${currentPage}: ${error.message}`);
+        }
+      }
     };
-    
-    img.src = pdfPageImages[pageIndex].url;
-  };
+
+    loadAndRenderPage();
+
+    // Cleanup function to prevent state updates after unmount
+    // and cancel any ongoing rendering operation
+    return () => {
+      isMounted = false;
+      
+      // Cancel any ongoing render task
+      if (renderTaskRef.current) {
+        try {
+          renderTaskRef.current.cancel();
+          renderTaskRef.current = null;
+        } catch (error) {
+          console.error("Error cancelling render task in cleanup:", error);
+        }
+      }
+      
+      // Release the rendering lock
+      renderingLockRef.current = false;
+    };
+  }, [currentPage, pdfDoc, pageCount]);
   
-  // Render annotations on the canvas
-  const renderAnnotations = (context) => {
-    if (!context) {
-      console.error("Canvas context is not available");
+  // Update the handlePageChange function
+  const handlePageChange = async (newPage) => {
+    if (newPage < 1 || newPage > pageCount || isLoading) {
+      return;
+    }
+    
+    // Don't attempt to change page if we're already rendering
+    if (renderingLockRef.current) {
+      console.log("Page change requested while rendering, ignoring");
       return;
     }
     
     try {
-      // Clear any previous annotations
-      context.save();
-      
-      // Render annotations based on their type
-      annotations.forEach(annotation => {
-        switch (annotation.type) {
-          case 'highlight':
-            context.fillStyle = `rgba(255, 255, 0, 0.3)`;
-            context.fillRect(
-              annotation.x,
-              annotation.y,
-              annotation.width,
-              annotation.height
-            );
-            break;
-          case 'underline':
-            context.strokeStyle = 'blue';
-            context.lineWidth = 1;
-            context.beginPath();
-            context.moveTo(annotation.x, annotation.y + annotation.height);
-            context.lineTo(annotation.x + annotation.width, annotation.y + annotation.height);
-            context.stroke();
-            break;
-          default:
-            break;
+      // Cancel any ongoing rendering
+      if (renderTaskRef.current) {
+        try {
+          renderTaskRef.current.cancel();
+          renderTaskRef.current = null;
+        } catch (error) {
+          console.error("Error cancelling render during page change:", error);
         }
-      });
+      }
       
-      context.restore();
+      // Release rendering lock in case it was set
+      renderingLockRef.current = false;
+      
+      // Set the new page number FIRST
+      setCurrentPage(newPage);
+      
+      // The page change effect will handle the actual rendering
+      console.log(`Changing to page ${newPage}`);
     } catch (error) {
-      console.error("Error rendering annotations:", error);
+      console.error("Error changing page:", error);
+      setError(`Failed to change to page ${newPage}: ${error.message}`);
     }
   };
-  
-  // Handle tool selection
-  const handleToolSelect = (toolId) => {
-    console.log(`Tool selected: ${toolId}`);
+
+  const handleFileSelect = async (event) => {
+    try {
+      const file = event.target.files[0];
+      if (!file) return;
+
+      // Check if file is a PDF
+      if (file.type !== 'application/pdf') {
+        setError('Please select a PDF file.');
+        return;
+      }
+
+      console.log("Selected file:", file.name, "Size:", (file.size / 1024 / 1024).toFixed(2), "MB");
+
+      // Clear previous state
+      setError(null);
+      
+      // Cancel any ongoing rendering
+      if (renderTaskRef.current) {
+        try {
+          renderTaskRef.current.cancel();
+          renderTaskRef.current = null;
+        } catch (error) {
+          console.error("Error cancelling render task:", error);
+        }
+      }
+      
+      // Release the rendering lock
+      renderingLockRef.current = false;
+      
+      // Clean up fabric canvas
+      cleanupFabricCanvas();
+      
+      // Reset PDF state
+      setPdfDoc(null);
+      setPdfFile(null);
+      setPdfName('');
+      setPdfUrl(null);
+      setPageCount(0);
+      setCurrentPage(1);
+      setPdfPageImages([]);
+      
+      // Reset view state
+      setScale(1.0);
+      setRotation(0);
+      scaleRef.current = 1.0;
+      rotationRef.current = 0;
+      
+      // Reset UI state
+      setActiveToolMode('cursor');
+      setUndoStack([]);
+      setRedoStack([]);
+      
+      // Initialize empty layers
+      setLayers([{
+        id: 'default-layer',
+        name: 'Default Layer',
+        visible: true,
+        locked: false,
+        objects: []
+      }]);
+      setActiveLayerIndex(0);
+
+      // Load the new PDF
+      await loadPDF(file);
+
+    } catch (error) {
+      console.error("Error selecting file:", error);
+      setError(`Failed to load file: ${error.message}`);
+    } finally {
+      // Clear the file input so the same file can be selected again
+      if (event.target) event.target.value = '';
+    }
+  };
+
+  // Update renderCurrentPage to respect rendering lock and improve quality
+  const renderCurrentPage = () => {
+    console.log("Triggering renderCurrentPage due to dependency change");
     
-    // Deactivate previous tool mode
-    if (fabricCanvas.current) {
-      fabricCanvas.current.isDrawingMode = false;
-      
-      // Disable objects selection when switching to drawing mode
-      if (toolId === 'draw' || toolId === 'highlight') {
-        fabricCanvas.current.selection = false;
-        fabricCanvas.current.forEachObject(obj => {
-          obj.selectable = false;
-          obj.evented = false;
-        });
-      } else {
-        fabricCanvas.current.selection = true;
-        fabricCanvas.current.forEachObject(obj => {
-          obj.selectable = true;
-          obj.evented = true;
-        });
-      }
-      
-      // Set drawing mode
-      if (toolId === 'draw') {
-        fabricCanvas.current.isDrawingMode = true;
-        fabricCanvas.current.freeDrawingBrush.color = drawingOptions.color;
-        fabricCanvas.current.freeDrawingBrush.width = drawingOptions.width;
-      }
-      
-      // Set up eraser
-      if (toolId === 'erase' && fabricCanvas.current) {
-        // Enable selection to select objects for deletion
-        fabricCanvas.current.selection = true;
-        fabricCanvas.current.forEachObject(obj => {
-          obj.selectable = true;
-        });
-      }
-      
-      // Set up text tool
-      if (toolId === 'text') {
-        // Enable clicking on canvas to add text
-        fabricCanvas.current.defaultCursor = 'text';
-        fabricCanvas.current.selection = true;
-      } else {
-        fabricCanvas.current.defaultCursor = 'default';
-      }
+    // Additional validation of page data
+    if (!Array.isArray(pdfPageImages) || pdfPageImages.length === 0) {
+      console.error("No PDF page images available");
+      return;
     }
     
-    setActiveToolMode(toolId);
-  };
-  
-  // Add function to apply current drawing options to selected object
-  const applyStylesToSelected = () => {
-    if (!fabricCanvas.current) return;
+    // Skip if we don't have page images, are out of bounds, or the rendering lock is active
+    if (currentPage <= 0 || currentPage > pdfPageImages.length) {
+      console.error("Invalid page number:", currentPage, "of", pdfPageImages.length);
+      return;
+    }
     
-    const activeObject = fabricCanvas.current.getActiveObject();
-    if (!activeObject) return;
+    // Get the current page's image data
+    const pageImage = pdfPageImages[currentPage - 1];
+    if (!pageImage) {
+      console.error("No image data for page", currentPage);
+      return;
+    }
     
-    // Start with the current drawing options
-    const styleUpdates = {
-      stroke: drawingOptions.color,
-      strokeWidth: drawingOptions.width,
-      opacity: drawingOptions.opacity
+    // Compatibility fix: support both url and dataUrl property names
+    const imageUrl = pageImage.dataUrl || pageImage.url;
+    if (!imageUrl) {
+      console.error("No image data URL available for current page");
+          return;
+        }
+        
+    // No need to proceed if there's no canvas reference
+    if (!canvasRef.current) {
+      console.error("Canvas reference is not available");
+      return;
+    }
+    
+    // Get scale from ref for latest value
+    const currentScale = scaleRef.current || 1.0;
+    console.log("Current scale from ref:", currentScale);
+    
+    // Create image to calculate dimensions
+    const img = new Image();
+    
+    // Set up handlers for the image loading
+    img.onload = () => {
+      try {
+        // Check if component is still mounted before proceeding
+        if (!canvasRef.current) {
+          console.log("Component unmounted during image load, aborting render");
+          return;
+        }
+        
+        // Get the 2D context for drawing
+        const ctx = canvasRef.current.getContext('2d');
+        if (!ctx) {
+          console.error("Failed to get 2D context");
+          return;
+        }
+        
+        // Calculate the dimensions for the canvas with the current scale factor
+        // Use device pixel ratio for higher quality
+        const dpr = window.devicePixelRatio || 1;
+        const scaledWidth = img.width * currentScale;
+        const scaledHeight = img.height * currentScale;
+        
+        // Set the displayed size (CSS dimensions)
+        canvasRef.current.style.width = `${scaledWidth}px`;
+        canvasRef.current.style.height = `${scaledHeight}px`;
+        
+        // Set the actual dimensions for high DPI (canvas buffer size)
+        canvasRef.current.width = scaledWidth * dpr;
+        canvasRef.current.height = scaledHeight * dpr;
+        
+        // Clear any previous content
+        ctx.clearRect(0, 0, canvasRef.current.width, canvasRef.current.height);
+        
+        // Scale for high DPI display
+        ctx.scale(dpr, dpr);
+        
+        // Apply rotation if needed
+        if (rotation !== 0) {
+          // Move to center, rotate, then translate back
+          ctx.translate(scaledWidth / 2, scaledHeight / 2);
+          ctx.rotate((rotation * Math.PI) / 180);
+          ctx.translate(-scaledWidth / 2, -scaledHeight / 2);
+        }
+        
+        // Draw the image at the scaled dimensions
+        ctx.drawImage(img, 0, 0, scaledWidth, scaledHeight);
+        
+        // Also update the overlay canvas size for annotations if it exists
+        if (overlayCanvasRef.current) {
+          try {
+            // Update fabric canvas dimensions
+            if (fabricCanvas.current) {
+              // Update the wrapper size first
+              if (fabricCanvas.current.wrapperEl) {
+                fabricCanvas.current.wrapperEl.style.width = `${scaledWidth}px`;
+                fabricCanvas.current.wrapperEl.style.height = `${scaledHeight}px`;
+              }
+              
+              // Update the canvas itself - this should trigger proper resizing of all elements
+              fabricCanvas.current.setWidth(scaledWidth);
+              fabricCanvas.current.setHeight(scaledHeight);
+              
+              // Calculate zoom factor relative to original PDF size
+              const zoomFactor = currentScale;
+              
+              // Apply zoom to all objects
+              try {
+                const objects = fabricCanvas.current.getObjects();
+                objects.forEach(obj => {
+                  // The objects are already placed relative to current scale, 
+                  // so we don't need to transform them if the scale hasn't changed
+                  // The scaling is handled by setWidth/setHeight above
+                });
+                
+                // Center content if zooming in (optional feature)
+                if (currentScale > 1.2) {
+                  fabricCanvas.current.viewportTransform[4] = (fabricCanvas.current.width - img.width * currentScale) / 2;
+                  fabricCanvas.current.viewportTransform[5] = (fabricCanvas.current.height - img.height * currentScale) / 2;
+                } else {
+                  // Reset transform for normal view
+                  fabricCanvas.current.viewportTransform[4] = 0;
+                  fabricCanvas.current.viewportTransform[5] = 0;
+                }
+                
+                // Safe render with fallback
+                try {
+            fabricCanvas.current.renderAll();
+                } catch (renderError) {
+                  console.error("Error in renderAll during resize:", renderError);
+                  try {
+                    fabricCanvas.current.requestRenderAll();
+                  } catch (secondError) {
+                    console.error("Fallback render also failed:", secondError);
+                  }
+                }
+              } catch (objectError) {
+                console.error("Error updating canvas objects:", objectError);
+              }
+            } else {
+              console.warn("Fabric canvas not available for size update");
+            }
+          } catch (overlayError) {
+            console.error("Error updating overlay canvas:", overlayError);
+            // If we have a critical error with the fabric canvas, 
+            // recreate it to avoid persistent issues
+            if (fabricCanvas.current) {
+              try {
+                // Reset rendering lock if it got stuck
+                if (renderingLockRef.current) {
+                  renderingLockRef.current = false;
+                }
+                
+                // Try to reinitialize the fabric canvas if it's in a bad state
+                fabricCanvas.current = null;
+                
+                // The canvas will be recreated on next render cycle through the useEffect
+              } catch (resetError) {
+                console.error("Error resetting canvas state:", resetError);
+              }
+            }
+          }
+        }
+      } catch (error) {
+        console.error("Error rendering current page:", error);
+        setError(`Rendering error: ${error.message}. Try refreshing the page.`);
+      }
     };
     
-    // Only set fill if enabled - this is the part we're improving
-    if (drawingOptions.fillEnabled) {
-      styleUpdates.fill = drawingOptions.fill;
-    } else {
-      // If fill is disabled, set transparent fill for all shapes
-      styleUpdates.fill = 'transparent';
+    // Error handler for the image
+    img.onerror = (error) => {
+      console.error("Error loading page image:", error);
+      setError("Failed to load page image. Try refreshing the page.");
+    };
+    
+    // Start loading the image
+    img.src = imageUrl;
+  };
+
+  // Function to save the edited PDF
+  const savePDF = async () => {
+    if (!pdfFile || !pdfDoc) {
+      setError("No PDF loaded to save");
+      return;
     }
     
-    // Apply styles based on object type
-    if (activeObject.type === 'i-text') {
-      // For text objects, handle fill and stroke differently
-      styleUpdates.fill = drawingOptions.color; // Text color
+    try {
+      setIsLoading(true);
+      console.log("Starting PDF save process...");
+
+      // Create a copy of the PDF document to avoid modifying the original
+      const pdfBytes = await pdfFile.save();
+      const newPdfDoc = await PDFDocument.load(pdfBytes.buffer);
       
-      // Set background color if fill is enabled
-      if (drawingOptions.fillEnabled) {
-        styleUpdates.backgroundColor = drawingOptions.fill;
-      } else {
-        styleUpdates.backgroundColor = null;
+      // Get all fabric objects from all visible layers
+      const allObjects = [];
+      if (fabricCanvas.current) {
+        const visibleLayers = layers.filter(layer => layer.visible);
+        
+        // Collect objects from visible layers
+        visibleLayers.forEach(layer => {
+          if (layer.objects && layer.objects.length) {
+            const layerObjects = fabricCanvas.current.getObjects().filter(obj => 
+              layer.objects.includes(obj.id)
+            );
+            allObjects.push(...layerObjects);
+          }
+        });
       }
+
+      // Handle each page separately
+      for (let i = 0; i < newPdfDoc.getPageCount(); i++) {
+        const pageIndex = i;
+        const page = newPdfDoc.getPage(pageIndex);
+        
+        // Only process the current page for now
+        // In a full implementation, you'd need to track objects per page
+        if (pageIndex === currentPage - 1) {
+          // Get page dimensions
+          const { width, height } = page.getSize();
+          
+          if (pdfPageImages[pageIndex] && fabricCanvas.current) {
+            // Create a temporary canvas to draw the fabric objects
+            const tempCanvas = document.createElement('canvas');
+            const tempCtx = tempCanvas.getContext('2d');
+            
+            // Set canvas dimensions to match the PDF page
+            tempCanvas.width = width;
+            tempCanvas.height = height;
+            
+            // Draw the fabric objects
+            const fabricObjects = fabricCanvas.current.toJSON();
+            
+            // For now, we're just embedding the entire canvas as an image
+            // A more sophisticated approach would convert vector objects to PDF annotations
+            if (fabricCanvas.current.getObjects().length > 0) {
+              const fabricImage = fabricCanvas.current.toDataURL({
+                format: 'png',
+                quality: 1.0,
+                multiplier: 2
+              });
+              
+              // Convert data URL to Uint8Array
+              const base64Data = fabricImage.split(',')[1];
+              const binaryData = atob(base64Data);
+              const data = new Uint8Array(binaryData.length);
+              for (let i = 0; i < binaryData.length; i++) {
+                data[i] = binaryData.charCodeAt(i);
+              }
+              
+              // Embed the image in the PDF
+              const pngImage = await newPdfDoc.embedPng(data);
+              page.drawImage(pngImage, {
+                x: 0,
+                y: 0,
+                width: width,
+                height: height,
+                opacity: 0.99 // Slightly transparent to avoid completely hiding text
+              });
+            }
+          }
+        }
+      }
+
+      // Save the PDF and offer it for download
+      const modifiedPdfBytes = await newPdfDoc.save();
+      
+      // Create a blob from the PDF bytes
+      const blob = new Blob([modifiedPdfBytes], { type: 'application/pdf' });
+      
+      // Create a download link
+      const link = document.createElement('a');
+      link.href = URL.createObjectURL(blob);
+      
+      // Generate a filename
+      const originalName = pdfName || 'document.pdf';
+      const nameWithoutExt = originalName.replace(/\.pdf$/i, '');
+      link.download = `${nameWithoutExt}_edited.pdf`;
+      
+      // Trigger the download
+      document.body.appendChild(link);
+      link.click();
+      
+      // Clean up
+      document.body.removeChild(link);
+      URL.revokeObjectURL(link.href);
+      
+      console.log("PDF saved successfully");
+    } catch (error) {
+      console.error("Error saving PDF:", error);
+      setError(`Failed to save PDF: ${error.message}`);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // Update the effect for handling renderCurrentPage
+  useEffect(() => {
+    // Use a timeout to ensure state is updated before rendering
+    const renderTimer = setTimeout(() => {
+      // Only run if we have page images and we're not currently rendering
+      if (canvasRef.current && pdfPageImages.length > 0 && 
+          currentPage <= pdfPageImages.length && !renderingLockRef.current) {
+        console.log("Triggering renderCurrentPage due to dependency change");
+        renderCurrentPage();
+      }
+    }, 50); // Short delay to let any state updates finish
+
+    return () => {
+      clearTimeout(renderTimer);
+    };
+  }, [currentPage, pdfPageImages, scale, rotation]); // Removed activeToolMode from dependencies
+
+  // Add a dedicated effect for text tool clicks on the canvas wrapper
+  useEffect(() => {
+    // Only add this handler when the text tool is active and we have both refs available
+    if (!canvasWrapperRef.current || activeToolMode !== 'text' || !fabricCanvas.current) {
+      return;
     }
     
-    console.log("Applying styles to object:", activeObject.type, styleUpdates);
+    console.log("Setting up additional text tool click handler on canvas wrapper");
     
-    // Apply styles to group objects
-    if (activeObject.type === 'activeSelection') {
-      // Apply styles to all objects in the group
-      activeObject.forEachObject(obj => {
-        const objStyles = {...styleUpdates};
+    const handleCanvasWrapperClick = (e) => {
+      try {
+        // Don't process clicks on fabric canvas elements - let those be handled by Fabric.js
+        if (e.target && (
+          e.target.tagName === 'CANVAS' || 
+          (e.target.className && typeof e.target.className === 'string' && 
+           (e.target.className.includes('canvas') || e.target.className.includes('fabric')))
+        )) {
+          return;
+        }
         
-        // Adjust for text objects in the group
-        if (obj.type === 'i-text') {
-          objStyles.fill = styleUpdates.stroke; // Text color
-          if (drawingOptions.fillEnabled) {
-            objStyles.backgroundColor = styleUpdates.fill;
-          } else {
-            objStyles.backgroundColor = null;
+        console.log("Canvas wrapper click detected for text tool");
+        
+        // Calculate position relative to canvas
+        const canvasEl = fabricCanvas.current.upperCanvasEl;
+        if (!canvasEl) {
+          return;
+        }
+        
+        const rect = canvasEl.getBoundingClientRect();
+        const x = e.clientX - rect.left;
+        const y = e.clientY - rect.top;
+        
+        // Only proceed if we have valid coordinates
+        if (isNaN(x) || isNaN(y)) {
+          console.error("Invalid coordinates in wrapper click:", x, y);
+          return;
+        }
+        
+        // Create synthetic fabric event
+        const fabricEvent = {
+          e: e,
+          target: null,
+          pointer: { x, y },
+          clientX: e.clientX,
+          clientY: e.clientY
+        };
+        
+        // Call the canvas click handler
+        console.log("Forwarding text click to handleCanvasClick:", x, y);
+        handleCanvasClick(fabricEvent);
+      } catch (error) {
+        console.error("Error in canvasWrapper click handler:", error);
+      }
+    };
+    
+    // Add the click handler - use capture phase to get it early
+    canvasWrapperRef.current.addEventListener('click', handleCanvasWrapperClick, true);
+    
+    // Clean up function
+    return () => {
+      if (canvasWrapperRef.current) {
+        canvasWrapperRef.current.removeEventListener('click', handleCanvasWrapperClick, true);
+      }
+    };
+  }, [activeToolMode, fabricCanvas.current]);
+
+  // Function to examine DOM structure and find the text editing element more reliably
+  const findAndFocusTextareaElement = (newText, fabricCanvasObj) => {
+    console.log("Finding and focusing text editing element");
+    
+    // Wait a moment for the DOM to update
+    setTimeout(() => {
+      try {
+        // Log the entire document structure related to the canvas
+        console.log("Fabric canvas element:", fabricCanvasObj?.lowerCanvasEl?.parentNode);
+        
+        // Try to directly access the canvas wrappers in the DOM
+        const canvasWrappers = document.querySelectorAll('.canvas-container, .pdf-editor-canvas-container');
+        console.log(`Found ${canvasWrappers.length} canvas containers:`, 
+                   Array.from(canvasWrappers).map(w => ({
+                     className: w.className,
+                     children: w.children.length
+                   }))
+                  );
+        
+        // Try to find textareas directly
+        const allTextareas = document.querySelectorAll('textarea');
+        console.log(`Found ${allTextareas.length} textareas:`, 
+                   Array.from(allTextareas).map(t => ({
+                     classes: t.className,
+                     id: t.id,
+                     parent: t.parentNode?.className || 'unknown'
+                   }))
+                  );
+        
+        // First try: get the textarea from Fabric.js directly
+        if (newText && (newText.hiddenTextarea || newText._hiddenTextarea)) {
+          console.log("Found textarea directly on Fabric.js IText object");
+          const textarea = newText.hiddenTextarea || newText._hiddenTextarea;
+          textarea.focus();
+          return true;
+        }
+        
+        // Second try: locate any textarea and focus it
+        if (allTextareas.length > 0) {
+          console.log("Focusing the first available textarea");
+          allTextareas[0].focus();
+          return true;
+        }
+        
+        // Last resort: if newText has the enterEditing method, try calling it again
+        if (newText && typeof newText.enterEditing === 'function') {
+          console.log("Trying to re-enter editing mode");
+          newText.enterEditing();
+          if (fabricCanvasObj) {
+            fabricCanvasObj.renderAll();
+          }
+          
+          // One last attempt - create a hidden textarea ourselves
+          if (!newText.hiddenTextarea && !newText._hiddenTextarea) {
+            try {
+              console.log("Creating a new hidden textarea as last resort");
+              // Create a hidden textarea
+              const textarea = document.createElement('textarea');
+              textarea.style.position = 'absolute';
+              textarea.style.opacity = '0';
+              textarea.style.width = '0px';
+              textarea.style.height = '0px';
+              textarea.className = 'fabric-text-editing-fallback';
+              
+              // Add to the document
+              document.body.appendChild(textarea);
+              
+              // Attach to text object
+              newText._hiddenTextarea = textarea;
+              
+              // Focus it
+              textarea.focus();
+              
+              // Setup auto cleanup
+              setTimeout(() => {
+                if (document.body.contains(textarea) && 
+                    (!newText.isEditing || !fabricCanvasObj.contains(newText))) {
+                  document.body.removeChild(textarea);
+                }
+              }, 5000); // Clean up after 5 seconds if not used
+              
+              console.log("Created fallback textarea");
+              return true;
+            } catch (createError) {
+              console.error("Error creating fallback textarea:", createError);
+            }
+          }
+          
+          return true;
+        }
+        
+        // Try to find textarea in our custom canvas container
+        if (canvasWrappers.length > 0) {
+          // Try to find a textarea within any of our canvas wrappers
+          for (const wrapper of canvasWrappers) {
+            const textareaInWrapper = wrapper.querySelector('textarea');
+            if (textareaInWrapper) {
+              console.log("Found textarea in canvas wrapper:", wrapper.className);
+              textareaInWrapper.focus();
+              return true;
+            }
           }
         }
         
-        obj.set(objStyles);
-      });
-    } else {
-      // Apply to single object
-      activeObject.set(styleUpdates);
-    }
-    
-    // Update the canvas
-    fabricCanvas.current.renderAll();
-    addToUndoStack();
+        return false;
+      } catch (error) {
+        console.error("Error in findAndFocusTextareaElement:", error);
+        return false;
+      }
+    }, 100); // Slightly longer timeout
   };
-  
-  // Enhanced addTextBox function that creates a better editable text object
-  const addTextBox = (x = 100, y = 100) => {
-    if (!fabricCanvas.current) return;
+
+  // Helper function to enhance text objects with better editing properties
+  const enhanceTextObject = (textObj) => {
+    if (!textObj) return;
     
     try {
-      console.log("Adding text at", x, y);
+      // Set basic properties
+      textObj.selectable = true;
+      textObj.editable = true;
+      textObj.hasControls = true;
+      textObj.hasBorders = true;
       
-      // Create a text box with default text
-      const text = new fabric.IText('Edit this text', {
-        left: x,
-        top: y,
-        fontFamily: textOptions.font,
-        fontSize: textOptions.size,
-        fill: textOptions.color,
-        backgroundColor: drawingOptions.fillEnabled ? drawingOptions.fill : null,
+      // Set editing appearance
+      textObj.editingBorderColor = '#00AEFF';
+      textObj.cursorWidth = 2;
+      textObj.cursorColor = '#000000';
+      textObj.cursorDuration = 600;
+      
+      // Initialize dimensions if needed
+      if (typeof textObj.initDimensions === 'function') {
+        textObj.initDimensions();
+      }
+      
+      console.log("Text object enhanced with better editing properties");
+    } catch (error) {
+      console.error("Error enhancing text object:", error);
+    }
+  };
+
+  // Add a dedicated effect for text tool keyboard events
+  useEffect(() => {
+    // Only add keyboard handler when text tool is active
+    if (activeToolMode !== 'text') {
+      return;
+    }
+    
+    console.log("Setting up dedicated text tool keyboard handler");
+    
+    // Handler for keyboard events
+    const handleKeyDown = (e) => {
+      try {
+        // Only handle if a text object is being edited
+        const activeObject = fabricCanvas.current?.getActiveObject();
+        if (activeObject && activeObject.type === 'i-text' && activeObject.isEditing) {
+          console.log("Text object is in editing mode, keyboard event handled normally");
+          return; // Let Fabric.js handle the event
+        }
+        
+        // If no text is being edited but we're in text mode and a printable key was pressed,
+        // create a new text object at the center of the canvas
+        if (fabricCanvas.current && 
+            e.key.length === 1 && // Printable character
+            !e.ctrlKey && !e.altKey && !e.metaKey) {
+          
+          console.log("Creating new text from keyboard input:", e.key);
+          
+          // Calculate center position
+          const canvasWidth = fabricCanvas.current.width;
+          const canvasHeight = fabricCanvas.current.height;
+          const centerX = canvasWidth / 2;
+          const centerY = canvasHeight / 2;
+          
+          // Create a new IText with the pressed key
+          const newText = new fabric.IText(e.key, {
+            left: centerX,
+            top: centerY,
+            fontFamily: textOptions.font || 'Helvetica',
+            fontSize: textOptions.size || 18,
+            fill: textOptions.color || '#000000',
+            backgroundColor: textOptions.backgroundColor,
+            fontWeight: textOptions.fontWeight || 'normal',
+            fontStyle: textOptions.fontStyle || 'normal',
         padding: 5,
         cornerSize: 8,
         transparentCorners: false,
-        cornerColor: '#0069d9',
-        borderColor: '#0069d9',
-        editingBorderColor: '#0069d9',
-        cursorColor: '#333',
-        cursorWidth: 2,
-        selectionColor: 'rgba(0, 105, 217, 0.3)',
-        lockScalingFlip: true,
         centeredScaling: true,
-        id: `text_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-        visible: layers[activeLayerIndex]?.visible ?? true,
-        selectable: !(layers[activeLayerIndex]?.locked ?? false),
-        evented: !(layers[activeLayerIndex]?.locked ?? false)
-      });
-      
-      // Enter editing mode immediately
-      fabricCanvas.current.add(text);
-      fabricCanvas.current.setActiveObject(text);
-      text.enterEditing();
-      
-      // Position cursor at end of text
-      text.selectAll();
-      
-      // Update canvas
-      fabricCanvas.current.renderAll();
-      
-      // Add the object ID to the active layer
-      setLayers(prev => {
-        const newLayers = [...prev];
-        if (newLayers[activeLayerIndex]) {
-          newLayers[activeLayerIndex].objects.push(text.id);
-        }
-        return newLayers;
-      });
-      
-      // Save state for undo
-      addToUndoStack();
-      
-      console.log("Text box added successfully");
-    } catch (error) {
-      console.error("Error adding text box:", error);
-    }
-  };
-  
-  // Add image
-  const addImage = async (file) => {
-    try {
-      const reader = new FileReader();
-      reader.onload = (e) => {
-        fabric.Image.fromURL(e.target.result, (img) => {
-          // Scale image to fit within canvas
-          const scale = Math.min(
-            (fabricCanvas.current.width / 2) / img.width,
-            (fabricCanvas.current.height / 2) / img.height
-          );
-          
-          img.scale(scale);
-          img.set({
-            left: 50,
-            top: 50
+            editable: true,
+            selectable: true,
+            hasControls: true,
+            hasBorders: true,
+            id: `text-${Date.now()}`,
+            editingBorderColor: '#00AEFF',  // Highlight color during editing
+            cursorWidth: 2,                 // Wider cursor for better visibility
+            cursorColor: '#000000',         // Black cursor
+            cursorDuration: 600             // Cursor blink rate in ms
           });
           
-          fabricCanvas.current.add(img);
-          fabricCanvas.current.setActiveObject(img);
-          addToUndoStack();
-        });
-      };
-      reader.readAsDataURL(file);
-    } catch (err) {
-      console.error('Error adding image:', err);
-      setError('Failed to add image. Please try again.');
+          // Initialize dimensions to ensure proper rendering
+          if (typeof newText.initDimensions === 'function') {
+            newText.initDimensions();
+          }
+          
+          // Add to canvas
+          fabricCanvas.current.add(newText);
+          fabricCanvas.current.setActiveObject(newText);
+          
+          // Enhance the text object with better editing properties
+          enhanceTextObject(newText);
+          
+          // Enter editing mode
+          newText.enterEditing();
+      fabricCanvas.current.renderAll();
+          console.log("Rendered new text from keyboard input");
+          
+          // Use our new function to find and focus the textarea
+          findAndFocusTextareaElement(newText, fabricCanvas.current);
+          
+          // Add to undo stack and active layer
+      addToUndoStack();
+          addObjectToActiveLayer(newText.id);
+      
+          // Prevent default to avoid double input
+          e.preventDefault();
+        }
+    } catch (error) {
+        console.error("Error in text tool keyboard handler:", error);
+      }
+    };
+    
+    // Add event listener
+    document.addEventListener('keydown', handleKeyDown);
+    
+    // Cleanup
+    return () => {
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [activeToolMode, textOptions]);
+
+  // Handle tool selection
+  const handleToolSelect = (toolId) => {
+    try {
+      console.log(`Selecting tool: ${toolId}`);
+      
+      // First update the state
+      setActiveToolMode(toolId);
+      
+      // Store the selected tool in session storage for persistence
+      try {
+        sessionStorage.setItem('pdfEditorActiveTool', toolId);
+      } catch (storageError) {
+        console.error("Error storing tool selection:", storageError);
+      }
+      
+      // If canvas isn't initialized, just update the state and return
+      if (!fabricCanvas.current) {
+        console.warn("Fabric canvas not initialized yet, only updating tool state");
+        return;
+      }
+      
+      // Disable drawing mode first - this is important to prevent brush issues
+      try {
+        fabricCanvas.current.isDrawingMode = false;
+      } catch (error) {
+        console.error("Error disabling drawing mode:", error);
+      }
+      
+      // Turn off erasing mode
+      setIsErasing(false);
+      
+      // Set basic cursor and selection options
+      try {
+        fabricCanvas.current.selection = true;
+        fabricCanvas.current.defaultCursor = 'default';
+        fabricCanvas.current.hoverCursor = 'default';
+      } catch (error) {
+        console.error("Error setting basic canvas options:", error);
+      }
+      
+      // Configure specific tool options
+      switch (toolId) {
+        case 'cursor':
+          // Default cursor mode is already set above
+          break;
+          
+        case 'text':
+          // Text mode
+          fabricCanvas.current.defaultCursor = 'text';
+          fabricCanvas.current.hoverCursor = 'text';
+          
+          // Configure canvas specifically for text editing
+          try {
+            // Make sure objects are selectable and clickable
+            fabricCanvas.current.selection = true;
+            
+            // Make sure any existing IText objects are properly configured for editing
+            const textObjects = fabricCanvas.current.getObjects('i-text');
+            if (textObjects && textObjects.length > 0) {
+              textObjects.forEach(textObj => {
+                if (textObj) {
+                  enhanceTextObject(textObj);
+                }
+              });
+            }
+            
+            console.log("Text tool mode configured successfully");
+            
+            // Force a render to update the cursor and object states
+            fabricCanvas.current.renderAll();
+          } catch (textToolError) {
+            console.error("Error configuring text tool:", textToolError);
+          }
+          break;
+          
+        case 'draw':
+          try {
+            // Check if fabric library is available
+            if (typeof fabric === 'undefined') {
+              console.error("Fabric library is not available");
+              setError("Drawing tools are not available");
+              return;
+            }
+            
+            // Create a new drawing brush to avoid save() issues
+            if (fabric.PencilBrush) {
+              // First try to release any existing brush
+              if (fabricCanvas.current.freeDrawingBrush) {
+                try {
+                  // Safely detach the old brush without calling save()
+                  fabricCanvas.current.freeDrawingBrush = null;
+                } catch (brushError) {
+                  console.error("Error clearing old brush:", brushError);
+                }
+              }
+              
+              // Create a new brush
+              try {
+                fabricCanvas.current.freeDrawingBrush = new fabric.PencilBrush(fabricCanvas.current);
+                
+                // Set brush properties
+                fabricCanvas.current.freeDrawingBrush.color = drawingOptions.color || '#000000';
+                fabricCanvas.current.freeDrawingBrush.width = drawingOptions.width || 2;
+                fabricCanvas.current.freeDrawingBrush.opacity = drawingOptions.opacity || 1.0;
+                
+                // Enable drawing mode last
+                fabricCanvas.current.isDrawingMode = true;
+                console.log("Drawing brush created and enabled");
+              } catch (newBrushError) {
+                console.error("Error creating drawing brush:", newBrushError);
+                setError("Could not initialize drawing tool");
+              }
+            } else {
+              console.error("Fabric.js PencilBrush not available");
+              setError("Drawing tools are not available");
+            }
+          } catch (error) {
+            console.error("Error setting up drawing tool:", error);
+            setError("Could not initialize drawing tool");
+          }
+        break;
+          
+        case 'highlight':
+          try {
+            // Check if fabric library is available
+            if (typeof fabric === 'undefined') {
+              console.error("Fabric library is not available");
+              setError("Highlighting tools are not available");
+              return;
+            }
+            
+            // Create a new highlight brush to avoid save() issues
+            if (fabric.PencilBrush) {
+              // First try to release any existing brush
+              if (fabricCanvas.current.freeDrawingBrush) {
+                try {
+                  // Safely detach the old brush without calling save()
+                  fabricCanvas.current.freeDrawingBrush = null;
+                } catch (brushError) {
+                  console.error("Error clearing old brush:", brushError);
+                }
+              }
+              
+              // Create a new brush
+              try {
+                fabricCanvas.current.freeDrawingBrush = new fabric.PencilBrush(fabricCanvas.current);
+                
+                // Set brush properties for highlighting
+                fabricCanvas.current.freeDrawingBrush.color = highlightColor || '#FFFF00';
+                fabricCanvas.current.freeDrawingBrush.width = 20;
+                fabricCanvas.current.freeDrawingBrush.opacity = 0.4;
+                
+                // Enable drawing mode last
+                fabricCanvas.current.isDrawingMode = true;
+                console.log("Highlight brush created and enabled");
+              } catch (newBrushError) {
+                console.error("Error creating highlight brush:", newBrushError);
+                setError("Could not initialize highlight tool");
+              }
+            } else {
+              console.error("Fabric.js PencilBrush not available");
+              setError("Highlighting tools are not available");
+            }
+          } catch (error) {
+            console.error("Error setting up highlight tool:", error);
+            setError("Could not initialize highlight tool");
+          }
+        break;
+          
+        case 'shape':
+          fabricCanvas.current.defaultCursor = 'crosshair';
+          fabricCanvas.current.hoverCursor = 'crosshair';
+        break;
+          
+        case 'eraser':
+          fabricCanvas.current.defaultCursor = 'crosshair';
+          fabricCanvas.current.hoverCursor = 'crosshair';
+          setIsErasing(true);
+        break;
+          
+      default:
+          // For any other tool, just use default settings
+          break;
+      }
+      
+      // Safe rendering with multiple fallbacks - but don't use renderAll that might call save()
+      try {
+        if (fabricCanvas.current) {
+          // Avoid using renderAll() which might call save() internally
+          try {
+            // First try requestRenderAll which is safer
+            if (typeof fabricCanvas.current.requestRenderAll === 'function') {
+              fabricCanvas.current.requestRenderAll();
+            } else if (typeof fabricCanvas.current.renderAll === 'function') {
+              // Fall back to regular renderAll if we must
+    fabricCanvas.current.renderAll();
+            }
+          } catch (renderError) {
+            console.error("Error rendering canvas:", renderError);
+            // If all render methods fail, try to force a redraw by changing a property
+            try {
+              const oldCursor = fabricCanvas.current.defaultCursor;
+              fabricCanvas.current.defaultCursor = oldCursor;
+            } catch (fallbackError) {
+              console.error("All render attempts failed:", fallbackError);
+            }
+          }
+        }
+      } catch (error) {
+        console.error("Error in safe rendering:", error);
+      }
+      
+    } catch (error) {
+      console.error("Tool selection error:", error);
+      setError(`Tool selection failed: ${error.message || "Unknown error"}`);
+      
+      // Reset to a safe state
+      setActiveToolMode('cursor');
+    }
+  };
+
+  // Handle zoom in
+  const zoomIn = () => {
+    if (scale >= 5) return; // Maximum zoom level
+    
+    const newScale = Math.min(scale + 0.25, 5);
+    setScale(newScale);
+    scaleRef.current = newScale;
+  };
+
+  // Handle zoom out
+  const zoomOut = () => {
+    if (scale <= 0.5) return; // Minimum zoom level
+    
+    const newScale = Math.max(scale - 0.25, 0.5);
+    setScale(newScale);
+    scaleRef.current = newScale;
+  };
+
+  // Fit PDF to container width
+  const fitToWidth = () => {
+    if (!canvasRef.current || !containerRef.current || !pdfPageImages[currentPage - 1]) return;
+    
+    const containerWidth = containerRef.current.clientWidth - 40; // Add padding
+    const pageWidth = pdfPageImages[currentPage - 1].originalWidth;
+    
+    const newScale = containerWidth / pageWidth;
+    setScale(newScale);
+    scaleRef.current = newScale;
+  };
+
+  // Toggle sidebar visibility
+  const toggleSidebar = () => {
+    setSidebarVisible(!sidebarVisible);
+  };
+
+  // Handle click on canvas
+  const handleCanvasClick = (e) => {
+    // First check if the fabric canvas exists
+    if (!fabricCanvas.current) {
+      console.log("Canvas not initialized yet");
+      return;
+    }
+    
+    try {
+      // Safe console log of the event to help debug
+      console.log("Canvas clicked at", e.pointer ? `(${e.pointer.x}, ${e.pointer.y})` : 
+                 (e.e ? `(${e.e.clientX}, ${e.e.clientY})` : "(unknown)"), 
+                 "tool:", activeToolMode);
+      
+      // Check if the event has the necessary data
+      if (!e) {
+        console.log("Empty event object");
+        return;
+      }
+      
+      // Handle the text tool specifically
+      if (activeToolMode === 'text') {
+        // Get the pointer position using multiple fallback strategies
+        let pointerX = null;
+        let pointerY = null;
+        
+        // Method 1: Direct pointer property
+        if (e.pointer && typeof e.pointer.x === 'number' && typeof e.pointer.y === 'number') {
+          pointerX = e.pointer.x;
+          pointerY = e.pointer.y;
+          console.log("Using direct pointer property:", pointerX, pointerY);
+        } 
+        // Method 2: Use fabric's getPointer
+        else if (e.e && fabricCanvas.current) {
+          try {
+            const pointer = fabricCanvas.current.getPointer(e.e);
+            if (pointer && typeof pointer.x === 'number' && typeof pointer.y === 'number') {
+              pointerX = pointer.x;
+              pointerY = pointer.y;
+              console.log("Using fabric getPointer:", pointerX, pointerY);
+            }
+          } catch (pointerError) {
+            console.error("Error using fabric's getPointer:", pointerError);
+          }
+        }
+        
+        // Method 3: Calculate from client coordinates
+        if ((pointerX === null || pointerY === null || isNaN(pointerX) || isNaN(pointerY)) && e.e) {
+          try {
+            const canvasEl = fabricCanvas.current.upperCanvasEl;
+            if (canvasEl) {
+              const rect = canvasEl.getBoundingClientRect();
+              if (e.e.clientX && e.e.clientY) {
+                pointerX = e.e.clientX - rect.left;
+                pointerY = e.e.clientY - rect.top;
+                console.log("Using client coordinates:", pointerX, pointerY);
+              }
+            }
+          } catch (clientCoordError) {
+            console.error("Error calculating from client coordinates:", clientCoordError);
+          }
+        }
+        
+        // Method 4: Last resort - try direct clientX/Y properties
+        if ((pointerX === null || pointerY === null || isNaN(pointerX) || isNaN(pointerY)) && e.clientX && e.clientY) {
+          try {
+            const canvasEl = fabricCanvas.current.upperCanvasEl;
+            if (canvasEl) {
+              const rect = canvasEl.getBoundingClientRect();
+              pointerX = e.clientX - rect.left;
+              pointerY = e.clientY - rect.top;
+              console.log("Using direct clientX/Y:", pointerX, pointerY);
+            }
+          } catch (directClientError) {
+            console.error("Error using direct clientX/Y:", directClientError);
+          }
+        }
+        
+        // If all methods failed, use sensible defaults in the middle of the canvas
+        if (pointerX === null || pointerY === null || isNaN(pointerX) || isNaN(pointerY)) {
+          console.error("All coordinate calculation methods failed, using default position");
+          if (fabricCanvas.current) {
+            pointerX = fabricCanvas.current.width / 2;
+            pointerY = fabricCanvas.current.height / 2;
+          } else {
+            // Fallback to arbitrary values if all else fails
+            pointerX = 100;
+            pointerY = 100;
+          }
+        }
+        
+        // Final verification that we have usable coordinates
+        if (isNaN(pointerX) || isNaN(pointerY)) {
+          console.error("Still got NaN coordinates after all fallbacks, cannot create text");
+          return;
+        }
+        
+        // Check if we're clicking on an existing object
+        let isClickOnObject = false;
+        try {
+          // Try to find a target at the click position
+          if (e.target || (fabricCanvas.current.findTarget && fabricCanvas.current.findTarget(e))) {
+            isClickOnObject = true;
+          }
+        } catch (targetError) {
+          console.error("Error finding target:", targetError);
+          // Continue with text creation
+        }
+        
+        // Only create new text if we're not clicking on an existing object
+        if (!isClickOnObject) {
+          console.log("Creating new text at", pointerX, pointerY);
+          
+          // Create a new text object with default text
+          const defaultText = 'Click to edit text';
+          
+          try {
+            // Create a new text object with default text
+            const newText = new fabric.IText(defaultText, {
+              left: pointerX,
+              top: pointerY,
+              fontFamily: textOptions.font || 'Helvetica',
+              fontSize: textOptions.size || 16,
+              fill: textOptions.color || '#000000',
+              backgroundColor: textOptions.backgroundColor,
+              fontWeight: textOptions.fontWeight || 'normal',
+              fontStyle: textOptions.fontStyle || 'normal',
+              padding: 5,
+              cornerSize: 8,
+              transparentCorners: false,
+              centeredScaling: true,
+              lockUniScaling: false,
+              editable: true,  // Explicitly make it editable
+              selectable: true, // Ensure it's selectable
+              hasControls: true, // Give it resize controls
+              hasBorders: true, // Show borders when selected
+              editingBorderColor: '#00AEFF', // Highlight color when editing
+              cursorWidth: 2, // Make cursor more visible
+              cursorColor: '#000000', // Black cursor
+              cursorDuration: 600, // Blink rate in ms
+              fontSize: textOptions.size || 18, // Slightly larger default size for better visibility
+              id: `text-${Date.now()}`
+            });
+            
+            // Ensure it's properly set up for editing
+            if (typeof newText.initDimensions === 'function') {
+              newText.initDimensions();
+            }
+            
+            // Add to canvas
+            fabricCanvas.current.add(newText);
+            fabricCanvas.current.setActiveObject(newText);
+            
+            // Enhance the text object with better editing properties
+            enhanceTextObject(newText);
+            
+            // Render immediately to show the text
+            try {
+    fabricCanvas.current.renderAll();
+              console.log("Initial render completed, text object added to canvas");
+            } catch (renderError) {
+              console.error("Error rendering after adding text:", renderError);
+              // Try alternative render methods
+              try {
+                fabricCanvas.current.requestRenderAll();
+              } catch (altRenderError) {
+                console.error("Alternative render also failed:", altRenderError);
+              }
+            }
+            
+            // Make sure the text object is properly configured for editing
+            newText.isEditing = false; // Reset edit state to allow clean enterEditing
+            
+            // Enter editing mode after a longer delay (allows the UI to update fully)
+            console.log("Scheduling text edit mode activation in 300ms");
+            setTimeout(() => {
+              try {
+                if (newText && fabricCanvas.current) {
+                  console.log("Activating text edit mode now");
+                  
+                  // Make sure this text object is the active object
+                  fabricCanvas.current.setActiveObject(newText);
+                  
+                  // Enter editing mode
+                  newText.enterEditing();
+                  
+                  // Select all text for easy replacement
+                  newText.selectAll();
+                  
+                  // Use our improved function to find and focus the textarea
+                  findAndFocusTextareaElement(newText, fabricCanvas.current);
+                  
+                  // Show the text editor popup
+                  showTextEditor(newText, { x: pointerX, y: pointerY });
+                  
+                  // Try to render again after entering edit mode
+                  try {
+                    fabricCanvas.current.renderAll();
+                    console.log("Text editing mode activated successfully");
+                  } catch (editRenderError) {
+                    console.error("Error rendering in edit mode:", editRenderError);
+                  }
+                } else {
+                  console.error("Text object or canvas no longer available for editing");
+                }
+              } catch (editError) {
+                console.error("Error entering text edit mode:", editError);
+              }
+            }, 300); // Increased timeout for better reliability
+            
+            // Add a second attempt as backup in case the first one fails
+            setTimeout(() => {
+              try {
+                if (newText && fabricCanvas.current && !newText.isEditing) {
+                  console.log("Trying text edit mode activation again (backup)");
+                  fabricCanvas.current.setActiveObject(newText);
+                  newText.enterEditing();
+                  fabricCanvas.current.renderAll();
+                }
+              } catch (retryError) {
+                console.error("Error in retry edit activation:", retryError);
+              }
+            }, 600); // Even longer timeout for the backup attempt
+    
+    // Add to undo stack
+    addToUndoStack();
+            
+            // Add object to active layer
+            addObjectToActiveLayer(newText.id);
+            
+            return; // Exit after adding text
+          } catch (textCreationError) {
+            console.error("Error creating text object:", textCreationError);
+          }
+        }
+      }
+      
+      // Handle other tools (if text tool handler didn't already return)
+      // Regular pointer behavior for other tools...
+      let pointer;
+      try {
+        pointer = fabricCanvas.current.getPointer(e);
+      } catch (pointerError) {
+        console.error("Error getting pointer position:", pointerError);
+        
+        // Fallback: calculate position manually
+        const canvasEl = fabricCanvas.current.upperCanvasEl;
+        if (!canvasEl) {
+          console.error("Canvas element not available");
+          return;
+        }
+        
+        const rect = canvasEl.getBoundingClientRect();
+        pointer = {
+          x: e.e.clientX - rect.left,
+          y: e.e.clientY - rect.top
+        };
+      }
+      
+      // If we still don't have a valid pointer, exit
+      if (!pointer || typeof pointer.x !== 'number' || typeof pointer.y !== 'number') {
+        console.error("Could not determine pointer position");
+        return;
+      }
+      
+      // Check if we already have a selected object
+      let isClickOnObject = false;
+      try {
+        // Only run findTarget if we're not already in drawing shape mode
+        if (!isDrawingShape) {
+          const target = fabricCanvas.current.findTarget(e);
+          isClickOnObject = !!target;
+        }
+      } catch (targetError) {
+        console.error("Error finding target:", targetError);
+        isClickOnObject = false;
+      }
+      
+      // Handle remaining tools
+      switch (activeToolMode) {
+        case 'shape':
+          // Handled by separate shape drawing functions
+          break;
+          
+        case 'stamp':
+          // Add a stamp at the clicked location
+          addStampAt(pointer.x, pointer.y, 'approved');
+          break;
+          
+        case 'signature':
+          // Add a signature placeholder at the clicked location
+          addSignatureAt(pointer.x, pointer.y);
+          break;
+          
+        default:
+          break;
+      }
+    } catch (error) {
+      console.error("Error handling canvas click:", error);
     }
   };
   
-  // Function to start shape drawing mode
-  const startShapeDrawing = (type) => {
-    setCurrentShapeType(type);
-    setIsDrawingShape(true);
+  // Helper function to add a stamp at a specific location
+  const addStampAt = (x, y, stampType = 'approved') => {
+    if (!fabricCanvas.current) return;
     
-    // Set cursor to crosshair to indicate drawing mode
-    if (fabricCanvas.current) {
-      fabricCanvas.current.defaultCursor = 'crosshair';
-      fabricCanvas.current.selection = false;
+    try {
+      // Define stamp properties based on type
+      let stampProps = {
+        text: 'STAMP',
+        fontFamily: 'Arial',
+        fontSize: 40,
+        fill: '#FF0000',
+        originX: 'center',
+        originY: 'center',
+        left: x,
+        top: y,
+        angle: -30,
+        opacity: 0.7,
+        id: `stamp-${Date.now()}`
+      };
       
-      // Disable selection of existing objects during drawing
-      fabricCanvas.current.forEachObject(obj => {
-        obj.selectable = false;
-        obj.evented = false;
-      });
+      // Customize based on stamp type
+      switch (stampType) {
+        case 'approved':
+          stampProps.text = 'APPROVED';
+          stampProps.fill = '#008800';
+          break;
+        case 'draft':
+          stampProps.text = 'DRAFT';
+          stampProps.fill = '#0000FF';
+          break;
+        case 'confidential':
+          stampProps.text = 'CONFIDENTIAL';
+          stampProps.fill = '#FF0000';
+          stampProps.fontSize = 30;
+          break;
+        default:
+          stampProps.text = stampType.toUpperCase();
+      }
+      
+      // Create the stamp as IText for easy editing
+      const stamp = new fabric.IText(stampProps.text, stampProps);
+      
+      // Add to canvas
+      fabricCanvas.current.add(stamp);
+      fabricCanvas.current.setActiveObject(stamp);
+      fabricCanvas.current.renderAll();
+      
+      // Add to undo stack
+      addToUndoStack();
+      
+      // Add object to active layer
+      addObjectToActiveLayer(stamp.id);
+    } catch (error) {
+      console.error("Error adding stamp:", error);
     }
+  };
+  
+  // Helper function to add a signature at a specific location
+  const addSignatureAt = (x, y) => {
+    if (!fabricCanvas.current) return;
     
-    console.log(`Starting shape drawing mode: ${type}`);
+    try {
+      // Create a signature placeholder
+      const signature = new fabric.IText('Your Signature', {
+        left: x,
+        top: y,
+        fontFamily: 'Brush Script MT',
+        fontSize: 30,
+        fill: '#000099',
+        originX: 'center',
+        originY: 'center',
+        angle: 0,
+        opacity: 0.9,
+        id: `signature-${Date.now()}`
+      });
+      
+      // Add to canvas
+      fabricCanvas.current.add(signature);
+      fabricCanvas.current.setActiveObject(signature);
+      fabricCanvas.current.renderAll();
+      
+      // Add to undo stack
+      addToUndoStack();
+      
+      // Add object to active layer
+      addObjectToActiveLayer(signature.id);
+    } catch (error) {
+      console.error("Error adding signature:", error);
+    }
   };
 
-  // Function to handle canvas mouse down for shape drawing
-  const handleCanvasMouseDown = (e) => {
+  // Add object to active layer
+  const addObjectToActiveLayer = (objectId) => {
+    if (activeLayerIndex < 0 || activeLayerIndex >= layers.length) return;
+    
+        setLayers(prev => {
+          const newLayers = [...prev];
+      if (!newLayers[activeLayerIndex].objects) {
+        newLayers[activeLayerIndex].objects = [];
+          }
+      
+      newLayers[activeLayerIndex].objects.push(objectId);
+          return newLayers;
+        });
+  };
+
+  // Handle object modified
+  const handleObjectModified = (e) => {
+    addToUndoStack();
+  };
+  
+  // Handle path created (when drawing)
+  const handlePathCreated = (e) => {
+    // Add unique ID to the path
+    const pathId = `path-${Date.now()}`;
+    e.path.set('id', pathId);
+    
+    // Add to undo stack
+    addToUndoStack();
+    
+    // Add object to active layer
+    addObjectToActiveLayer(pathId);
+  };
+  
+  // Add to undo stack
+  const addToUndoStack = () => {
+    if (!fabricCanvas.current) return;
+    
+    try {
+      // Get the current canvas state
+      const canvasJson = fabricCanvas.current.toJSON(['id']);
+      
+      // Add to undo stack
+      setUndoStack(prev => [...prev, canvasJson]);
+      
+      // Clear redo stack when a new change is made
+      setRedoStack([]);
+    } catch (error) {
+      console.error("Error adding to undo stack:", error);
+    }
+  };
+  
+  // Handle undo
+  const handleUndo = () => {
+    if (undoStack.length === 0 || !fabricCanvas.current) return;
+    
+    try {
+      // Get the current canvas state for redo
+      const currentState = fabricCanvas.current.toJSON(['id']);
+      
+      // Add current state to redo stack
+      setRedoStack(prev => [...prev, currentState]);
+      
+      // Get the last state from undo stack
+      const newStack = [...undoStack];
+      const lastState = newStack.pop();
+      setUndoStack(newStack);
+      
+      // Load the state
+      if (lastState) {
+        fabricCanvas.current.loadFromJSON(lastState, () => {
+        fabricCanvas.current.renderAll();
+      });
+      }
+    } catch (error) {
+      console.error("Error during undo:", error);
+    }
+  };
+  
+  // Handle redo
+  const handleRedo = () => {
+    if (redoStack.length === 0 || !fabricCanvas.current) return;
+    
+    try {
+      // Get the current canvas state for undo
+      const currentState = fabricCanvas.current.toJSON(['id']);
+      
+      // Add current state to undo stack
+      setUndoStack(prev => [...prev, currentState]);
+      
+      // Get the last state from redo stack
+      const newStack = [...redoStack];
+      const nextState = newStack.pop();
+      setRedoStack(newStack);
+      
+      // Load the state
+      if (nextState) {
+      fabricCanvas.current.loadFromJSON(nextState, () => {
+        fabricCanvas.current.renderAll();
+      });
+      }
+    } catch (error) {
+      console.error("Error during redo:", error);
+    }
+  };
+  
+  // Add shape to canvas
+  const addShape = (shapeType) => {
+    if (!fabricCanvas.current) return;
+    
+    // Set drawing mode and shape type
+    setIsDrawingShape(true);
+    setCurrentShapeType(shapeType);
+    
+    // Change cursor and disable selection during drawing
+    fabricCanvas.current.defaultCursor = 'crosshair';
+    fabricCanvas.current.selection = false;
+    
+    // Make objects non-selectable during drawing
+    fabricCanvas.current.forEachObject(obj => {
+      obj.selectable = false;
+      obj.evented = false;
+    });
+    
+    // Set up mouse event handlers for drawing
+    fabricCanvas.current.on('mouse:down', startDrawingShape);
+    fabricCanvas.current.on('mouse:move', drawingShapeUpdate);
+    fabricCanvas.current.on('mouse:up', finishDrawingShape);
+  };
+
+  // Start drawing a shape
+  const startDrawingShape = (e) => {
     if (!isDrawingShape || !fabricCanvas.current) return;
     
-    // Get pointer coordinates
     const pointer = fabricCanvas.current.getPointer(e.e);
     setDrawStartPoint({ x: pointer.x, y: pointer.y });
     
-    // Create initial shape based on type
     let shape;
-    const commonProps = {
-      left: pointer.x,
-      top: pointer.y,
-      width: 0,
-      height: 0,
-      fill: drawingOptions.fillEnabled ? drawingOptions.fill : 'transparent',
-      stroke: drawingOptions.color,
-      strokeWidth: drawingOptions.width,
-      opacity: drawingOptions.opacity,
-      strokeUniform: true,
-      transparentCorners: false,
-      cornerColor: '#0069d9',
-      cornerSize: 8,
-      cornerStyle: 'circle',
-      borderColor: '#0069d9'
-    };
-    
     switch (currentShapeType) {
       case 'rect':
       case 'square':
         shape = new fabric.Rect({
-          ...commonProps,
-          originX: 'left',
-          originY: 'top'
+          left: pointer.x,
+          top: pointer.y,
+          width: 0,
+          height: 0,
+          fill: drawingOptions.fillEnabled ? drawingOptions.fill : 'transparent',
+          stroke: drawingOptions.color,
+          strokeWidth: drawingOptions.width,
+          opacity: drawingOptions.opacity,
+          id: `shape-${Date.now()}`
         });
         break;
       case 'circle':
-        shape = new fabric.Circle({
-          ...commonProps,
-          left: pointer.x,
-          top: pointer.y,
-          radius: 1, // Start with a tiny radius
-          originX: 'center',
-          originY: 'center'
-        });
-        break;
       case 'ellipse':
         shape = new fabric.Ellipse({
-          ...commonProps,
           left: pointer.x,
           top: pointer.y,
-          rx: 1, // Start with tiny radii
-          ry: 1,
-          originX: 'center',
-          originY: 'center'
+          rx: 0,
+          ry: 0,
+          fill: drawingOptions.fillEnabled ? drawingOptions.fill : 'transparent',
+          stroke: drawingOptions.color,
+          strokeWidth: drawingOptions.width,
+          opacity: drawingOptions.opacity,
+          id: `shape-${Date.now()}`
         });
         break;
       case 'triangle':
         shape = new fabric.Triangle({
-          ...commonProps,
-          originX: 'left',
-          originY: 'top'
+          left: pointer.x,
+          top: pointer.y,
+          width: 0,
+          height: 0,
+          fill: drawingOptions.fillEnabled ? drawingOptions.fill : 'transparent',
+          stroke: drawingOptions.color,
+          strokeWidth: drawingOptions.width,
+          opacity: drawingOptions.opacity,
+          id: `shape-${Date.now()}`
         });
         break;
       case 'line':
@@ -1327,87 +3023,80 @@ const PDFEditor = () => {
           stroke: drawingOptions.color,
           strokeWidth: drawingOptions.width,
           opacity: drawingOptions.opacity,
-          fill: drawingOptions.fillEnabled ? drawingOptions.fill : 'transparent'
+          id: `shape-${Date.now()}`
         });
         break;
       default:
-        return; // Exit if shape type is not supported for drawing
-    }
+        return;
+      }
     
-    fabricCanvas.current.add(shape);
-    fabricCanvas.current.renderAll();
-    setTempShapeObj(shape);
+    if (shape) {
+      fabricCanvas.current.add(shape);
+      setTempShapeObj(shape);
+    }
   };
 
-  // Function to handle canvas mouse move for shape drawing
-  const handleCanvasMouseMove = (e) => {
+  // Update shape while drawing
+  const drawingShapeUpdate = (e) => {
     if (!isDrawingShape || !tempShapeObj || !fabricCanvas.current) return;
     
     const pointer = fabricCanvas.current.getPointer(e.e);
+    const startPoint = drawStartPoint;
     
-    // Calculate width and height
-    let width = Math.abs(pointer.x - drawStartPoint.x);
-    let height = Math.abs(pointer.y - drawStartPoint.y);
+    let width = Math.abs(pointer.x - startPoint.x);
+    let height = Math.abs(pointer.y - startPoint.y);
     
-    // Calculate left and top positions if the shape grows in negative direction
-    let left = drawStartPoint.x;
-    let top = drawStartPoint.y;
-    
-    if (pointer.x < drawStartPoint.x) {
-      left = pointer.x;
-    }
-    
-    if (pointer.y < drawStartPoint.y) {
-      top = pointer.y;
-    }
-    
-    // Enforce square aspect ratio if needed
-    if (currentShapeType === 'square') {
+    if (currentShapeType === 'square' || currentShapeType === 'circle') {
+      // For square/circle, make width and height equal
       const size = Math.max(width, height);
       width = size;
       height = size;
-      
-      // Adjust left/top for square to maintain the corner where the drag started
-      if (pointer.x < drawStartPoint.x) {
-        left = drawStartPoint.x - size;
-      }
-      
-      if (pointer.y < drawStartPoint.y) {
-        top = drawStartPoint.y - size;
+    }
+    
+    let left = startPoint.x;
+    let top = startPoint.y;
+    
+    // Adjust position if drawing from right to left or bottom to top
+    if (pointer.x < startPoint.x) {
+      left = pointer.x;
+      if (currentShapeType === 'square' || currentShapeType === 'circle') {
+        left = startPoint.x - width;
       }
     }
     
-    // Update shape based on type
-    switch (currentShapeType) {
+    if (pointer.y < startPoint.y) {
+      top = pointer.y;
+      if (currentShapeType === 'square' || currentShapeType === 'circle') {
+        top = startPoint.y - height;
+      }
+    }
+    
+    switch (tempShapeObj.type) {
       case 'rect':
-      case 'square':
-      case 'triangle':
         tempShapeObj.set({
-          width: width,
-          height: height,
           left: left,
-          top: top
-        });
-        break;
-      case 'circle':
-        // For circle, calculate radius based on the distance from center
-        const dx = pointer.x - drawStartPoint.x;
-        const dy = pointer.y - drawStartPoint.y;
-        const radius = Math.sqrt(dx * dx + dy * dy) / 2;
-        
-        tempShapeObj.set({
-          radius: radius
+          top: top,
+      width: width,
+          height: height
         });
         break;
       case 'ellipse':
-        // For ellipse, set rx and ry based on the width and height
         tempShapeObj.set({
+          left: left,
+          top: top,
           rx: width / 2,
           ry: height / 2
         });
         break;
+      case 'triangle':
+        tempShapeObj.set({
+          left: left,
+          top: top,
+          width: width,
+          height: height
+        });
+        break;
       case 'line':
-        // For line, update end point
         tempShapeObj.set({
           x2: pointer.x,
           y2: pointer.y
@@ -1418,37 +3107,23 @@ const PDFEditor = () => {
     fabricCanvas.current.renderAll();
   };
 
-  // Function to handle canvas mouse up for shape drawing
-  const handleCanvasMouseUp = () => {
-    if (!isDrawingShape || !tempShapeObj || !fabricCanvas.current) return;
+  // Finish drawing a shape
+  const finishDrawingShape = (e) => {
+    if (!isDrawingShape || !fabricCanvas.current) return;
     
-    // Finish the shape and assign an ID
-    tempShapeObj.id = `shape_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-    tempShapeObj.visible = layers[activeLayerIndex]?.visible ?? true;
-    tempShapeObj.selectable = !(layers[activeLayerIndex]?.locked ?? false);
-    tempShapeObj.evented = !(layers[activeLayerIndex]?.locked ?? false);
-    
-    // Add the shape to the current layer
-    setLayers(prev => {
-      const newLayers = [...prev];
-      if (newLayers[activeLayerIndex]) {
-        newLayers[activeLayerIndex].objects.push(tempShapeObj.id);
-      }
-      return newLayers;
-    });
-    
-    // Activate the shape for further editing
-    fabricCanvas.current.setActiveObject(tempShapeObj);
+    // Remove event listeners
+    fabricCanvas.current.off('mouse:down', startDrawingShape);
+    fabricCanvas.current.off('mouse:move', drawingShapeUpdate);
+    fabricCanvas.current.off('mouse:up', finishDrawingShape);
     
     // Reset drawing state
-    setTempShapeObj(null);
     setIsDrawingShape(false);
     
-    // Reset cursor and enable selection
+    // Restore cursor and selection
     fabricCanvas.current.defaultCursor = 'default';
     fabricCanvas.current.selection = true;
     
-    // Re-enable selection of objects
+    // Make objects selectable again
     fabricCanvas.current.forEachObject(obj => {
       if (!layers.some(layer => layer.locked && layer.objects.includes(obj.id))) {
         obj.selectable = true;
@@ -1456,615 +3131,247 @@ const PDFEditor = () => {
       }
     });
     
-    // Add to undo stack
+    if (tempShapeObj) {
+      // Finalize the shape
+      fabricCanvas.current.setActiveObject(tempShapeObj);
+      
+      // Add to undo stack
     addToUndoStack();
+      
+      // Add object to active layer
+      addObjectToActiveLayer(tempShapeObj.id);
+      
+      // Reset the temporary object reference
+      setTempShapeObj(null);
+    }
+    
+    fabricCanvas.current.renderAll();
   };
 
-  // Add event listeners to fabric canvas for shape drawing
-  useEffect(() => {
-    if (fabricCanvas.current && isDrawingShape) {
-      fabricCanvas.current.on('mouse:down', handleCanvasMouseDown);
-      fabricCanvas.current.on('mouse:move', handleCanvasMouseMove);
-      fabricCanvas.current.on('mouse:up', handleCanvasMouseUp);
-    }
+  // Apply current drawing styles to selected object
+  const applyStylesToSelected = () => {
+    if (!fabricCanvas.current) return;
     
-    return () => {
-      if (fabricCanvas.current) {
-        fabricCanvas.current.off('mouse:down', handleCanvasMouseDown);
-        fabricCanvas.current.off('mouse:move', handleCanvasMouseMove);
-        fabricCanvas.current.off('mouse:up', handleCanvasMouseUp);
-      }
-    };
-  }, [isDrawingShape, tempShapeObj, drawStartPoint, currentShapeType, fabricCanvas.current]);
-
-  // Modified addShape function to start drawing mode instead of creating fixed shapes
-  const addShape = (type) => {
-    if (type === 'star' || type === 'heart' || type === 'arrow') {
-      // For complex shapes, keep the old behavior of adding predefined shapes
-      let shape;
-      
-      // Default props for all shapes
-      const commonProps = {
-        left: 50,
-        top: 50,
-        fill: drawingOptions.fillEnabled ? drawingOptions.fill : 'transparent',
-        stroke: drawingOptions.color,
-        strokeWidth: drawingOptions.width,
-        opacity: drawingOptions.opacity,
-        strokeUniform: true,
-        transparentCorners: false,
-        cornerColor: '#0069d9',
-        cornerSize: 8,
-        cornerStyle: 'circle',
-        borderColor: '#0069d9',
-        id: `shape_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-        visible: layers[activeLayerIndex]?.visible ?? true,
-        selectable: !(layers[activeLayerIndex]?.locked ?? false),
-        evented: !(layers[activeLayerIndex]?.locked ?? false)
-      };
-      
-      if (type === 'star') {
-        // Create a star shape
-        const starPoints = [];
-        const spikes = 5;
-        const outerRadius = 50;
-        const innerRadius = 25;
-        
-        for (let i = 0; i < spikes * 2; i++) {
-          const radius = i % 2 === 0 ? outerRadius : innerRadius;
-          const angle = (Math.PI / spikes) * i;
-          const x = radius * Math.cos(angle);
-          const y = radius * Math.sin(angle);
-          starPoints.push({ x, y });
-        }
-        
-        shape = new fabric.Polygon(starPoints, {
-          ...commonProps
-        });
-      } else if (type === 'heart') {
-        // Create a heart shape path
-        const heartPath = 'M 10,30 A 20,20 0,0,1 50,30 A 20,20 0,0,1 90,30 Q 90,60 50,90 Q 10,60 10,30 z';
-        shape = new fabric.Path(heartPath, {
-          ...commonProps,
-          scaleX: 0.5,
-          scaleY: 0.5
-        });
-      } else if (type === 'arrow') {
-        // Create custom arrow shape
-        const points = [0, 0, 100, 0, 95, -5, 100, 0, 95, 5];
-        shape = new fabric.Polyline(points, {
-          ...commonProps,
-          originX: 'left',
-          originY: 'center'
-        });
-      }
-      
-      if (shape) {
-        console.log(`Adding ${type} shape with fill:`, commonProps.fill);
-        
-        fabricCanvas.current.add(shape);
-        fabricCanvas.current.setActiveObject(shape);
-        
-        // Add the object ID to the active layer
-        setLayers(prev => {
-          const newLayers = [...prev];
-          if (newLayers[activeLayerIndex]) {
-            newLayers[activeLayerIndex].objects.push(shape.id);
-          }
-          return newLayers;
-        });
-        
-        addToUndoStack();
-      }
-    } else {
-      // For basic shapes, use the new drawing mode
-      startShapeDrawing(type);
-    }
-  };
-  
-  // Handle object modification
-  const handleObjectModified = () => {
-    addToUndoStack();
-  };
-  
-  // Handle path creation (drawing)
-  const handlePathCreated = () => {
-    addToUndoStack();
-  };
-  
-  // Add to undo stack
-  const addToUndoStack = () => {
-    if (!fabricCanvas.current) {
-      return;
-    }
+    const activeObject = fabricCanvas.current.getActiveObject();
+    if (!activeObject) return;
     
     try {
-      // Assign unique IDs to objects if they don't have one
-      fabricCanvas.current.getObjects().forEach(obj => {
-        if (!obj.id) {
-          obj.id = `obj_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-        }
-      });
-      
-      // Update the active layer's objects list
-      setLayers(prev => {
-        const newLayers = [...prev];
-        if (newLayers[activeLayerIndex]) {
-          // Get all objects on the canvas
-          const objects = fabricCanvas.current.getObjects();
-          
-          // Filter objects not already in other layers
-          const otherLayerObjects = newLayers
-            .filter((_, i) => i !== activeLayerIndex)
-            .flatMap(layer => layer.objects);
-          
-          // Update active layer with new objects
-          newLayers[activeLayerIndex].objects = objects
-            .filter(obj => !otherLayerObjects.includes(obj.id))
-            .map(obj => obj.id);
-        }
-        return newLayers;
-      });
-      
-      const json = fabricCanvas.current.toJSON(['id']);
-      setUndoStack(prev => [...prev, json]);
-      setRedoStack([]);
-    } catch (error) {
-      console.error("Error adding to undo stack:", error);
-    }
-  };
-  
-  // Handle undo
-  const handleUndo = () => {
-    if (!fabricCanvas.current || undoStack.length === 0) {
-      return;
-    }
-    
-    try {
-      const prevState = undoStack[undoStack.length - 1];
-      const currentState = fabricCanvas.current.toJSON();
-      
-      setRedoStack(prev => [...prev, currentState]);
-      setUndoStack(prev => prev.slice(0, -1));
-      
-      fabricCanvas.current.loadFromJSON(prevState, () => {
-        fabricCanvas.current.renderAll();
-      });
-    } catch (error) {
-      console.error("Error during undo:", error);
-    }
-  };
-  
-  // Handle redo
-  const handleRedo = () => {
-    if (!fabricCanvas.current || redoStack.length === 0) {
-      return;
-    }
-    
-    try {
-      const nextState = redoStack[redoStack.length - 1];
-      const currentState = fabricCanvas.current.toJSON();
-      
-      setUndoStack(prev => [...prev, currentState]);
-      setRedoStack(prev => prev.slice(0, -1));
-      
-      fabricCanvas.current.loadFromJSON(nextState, () => {
-        fabricCanvas.current.renderAll();
-      });
-    } catch (error) {
-      console.error("Error during redo:", error);
-    }
-  };
-  
-  // Save PDF with annotations
-  const savePDF = async () => {
-    try {
-      if (!pdfFile) {
-        console.error("No PDF file to save");
-        setError("No PDF file to save. Please open a PDF first.");
-        return;
-      }
-      
-      setIsLoading(true);
-      
-      // Create a new canvas to merge PDF and annotations
-      const mergeCanvas = document.createElement('canvas');
-      mergeCanvas.width = canvasRef.current.width;
-      mergeCanvas.height = canvasRef.current.height;
-      const mergeContext = mergeCanvas.getContext('2d');
-      
-      // Draw the PDF page
-      mergeContext.drawImage(canvasRef.current, 0, 0);
-      
-      // Draw the annotations from Fabric.js canvas
-      if (fabricCanvas.current) {
-        // Get the data URL from the Fabric.js canvas
-        const fabricDataUrl = fabricCanvas.current.toDataURL({
-          format: 'png',
-          quality: 1
+      // Apply styles based on object type
+      if (activeObject.type === 'path') {
+        // For freehand drawing paths
+        activeObject.set({
+          stroke: drawingOptions.color,
+          strokeWidth: drawingOptions.width,
+          opacity: drawingOptions.opacity
+        });
+      } else {
+        // For shapes and other objects
+        activeObject.set({
+          stroke: drawingOptions.color,
+          strokeWidth: drawingOptions.width,
+          opacity: drawingOptions.opacity
         });
         
-        // Create an image from the data URL
-        const fabricImage = new Image();
-        fabricImage.src = fabricDataUrl;
-        
-        // Wait for the image to load
-        await new Promise((resolve) => {
-          fabricImage.onload = resolve;
-        });
-        
-        // Draw the annotations on top of the PDF
-        mergeContext.drawImage(fabricImage, 0, 0);
-      }
-      
-      // Convert the merged canvas to a data URL
-      const mergedDataUrl = mergeCanvas.toDataURL('image/png');
-      
-      // Create a download link
-      const link = document.createElement('a');
-      link.href = mergedDataUrl;
-      link.download = pdfName.replace('.pdf', '_edited.png');
-      
-      // Trigger the download
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      
-      setIsLoading(false);
-    } catch (error) {
-      console.error("Error saving PDF:", error);
-      setError(`Failed to save PDF: ${error.message}`);
-      setIsLoading(false);
-    }
-  };
-  
-  // Extract text using OCR
-  const extractText = async () => {
-    if (!ocrWorker.current) {
-      try {
-        setIsLoading(true);
-        // Initialize OCR worker if not already initialized
-        const worker = await createWorker('eng', 1, {
-          logger: m => {
-            if (m && typeof m.progress === 'number') {
-              console.log(`OCR Progress: ${Math.round(m.progress * 100)}%`);
-            }
-          }
-        });
-        
-        ocrWorker.current = worker;
-        console.log("OCR worker initialized on demand");
-      } catch (error) {
-        console.error("Failed to initialize OCR worker:", error);
-        setIsLoading(false);
-        alert("OCR functionality could not be initialized. Please try again later.");
-        return;
-      }
-    }
-    
-    try {
-      setIsLoading(true);
-      
-      const canvas = canvasRef.current;
-      if (!canvas) {
-        throw new Error("Canvas not available");
-      }
-      
-      // Convert canvas to blob to avoid cloning issues
-      const blob = await new Promise(resolve => {
-        canvas.toBlob(blob => resolve(blob), 'image/png');
-      });
-      
-      if (!blob) {
-        throw new Error("Failed to convert canvas to image");
-      }
-      
-      // Use Tesseract.js v3.0.3 API
-      const { data } = await ocrWorker.current.recognize(blob);
-      
-      // Add extracted text as editable text objects
-      const lines = data.text.split('\n');
-      lines.forEach((line, i) => {
-        if (line.trim()) {
-          const text = new fabric.IText(line, {
-            left: 50,
-            top: 50 + (i * 20),
-            fontFamily: textOptions.font,
-            fontSize: textOptions.size,
-            fill: textOptions.color,
-            editable: true
+        // Apply fill if enabled
+        if (drawingOptions.fillEnabled) {
+          activeObject.set({
+            fill: drawingOptions.fill
           });
-          fabricCanvas.current.add(text);
         }
-      });
+      }
       
       fabricCanvas.current.renderAll();
-      setIsLoading(false);
-      
-    } catch (error) {
-      console.error("Error extracting text:", error);
-      setError(`Failed to extract text: ${error.message}`);
-      setIsLoading(false);
-      alert("Failed to extract text. Please try again.");
-    }
-  };
-
-  // Add new function to handle text highlighting
-  const addHighlight = (x, y, width, height) => {
-    const highlight = new fabric.Rect({
-      left: x,
-      top: y,
-      width: width,
-      height: height,
-      fill: highlightColor,
-      opacity: 0.3,
-      selectable: true
-    });
-    
-    fabricCanvas.current.add(highlight);
-    fabricCanvas.current.setActiveObject(highlight);
-    addToUndoStack();
-  };
-
-  // Add new function to handle stamps
-  const addStamp = (type) => {
-    let stamp;
-    const stampSize = 100;
-    
-    switch (type) {
-      case 'approved':
-        stamp = new fabric.Text('APPROVED', {
-          left: 50,
-          top: 50,
-          fontSize: 40,
-          fill: 'red',
-          fontFamily: 'Arial',
-          angle: -30
-        });
-        break;
-      case 'draft':
-        stamp = new fabric.Text('DRAFT', {
-          left: 50,
-          top: 50,
-          fontSize: 40,
-          fill: 'gray',
-          fontFamily: 'Arial',
-          angle: -30
-        });
-        break;
-      case 'confidential':
-        stamp = new fabric.Text('CONFIDENTIAL', {
-          left: 50,
-          top: 50,
-          fontSize: 40,
-          fill: 'red',
-          fontFamily: 'Arial',
-          angle: -30
-        });
-        break;
-    }
-    
-    if (stamp) {
-      fabricCanvas.current.add(stamp);
-      fabricCanvas.current.setActiveObject(stamp);
       addToUndoStack();
+      } catch (error) {
+      console.error("Error applying styles:", error);
     }
   };
 
-  // Add new function to handle watermarks
-  const addWatermark = (text) => {
-    const canvas = fabricCanvas.current;
-    const watermark = new fabric.Text(text, {
-      left: canvas.width / 2,
-      top: canvas.height / 2,
-      fontSize: 60,
-      fill: 'rgba(200, 200, 200, 0.3)',
-      fontFamily: 'Arial',
-      angle: -45,
-      originX: 'center',
-      originY: 'center',
-      selectable: true
-    });
-    
-    canvas.add(watermark);
-    canvas.setActiveObject(watermark);
-    addToUndoStack();
-  };
-
-  // Add this function after the component declaration
-  useEffect(() => {
-    // Check if the PDF.js worker is loaded correctly
-    const checkWorker = async () => {
-      try {
-        console.log("Checking PDF.js worker...");
-        console.log("Worker source:", pdfjsLib.GlobalWorkerOptions.workerSrc);
-        
-        // Create a minimal valid PDF for testing
-        const minimalPdf = new Uint8Array([
-          0x25, 0x50, 0x44, 0x46, 0x2D, 0x31, 0x2E, 0x37, 0x0A, 0x31, 0x20, 0x30,
-          0x20, 0x6F, 0x62, 0x6A, 0x0A, 0x3C, 0x3C, 0x2F, 0x54, 0x79, 0x70, 0x65,
-          0x2F, 0x43, 0x61, 0x74, 0x61, 0x6C, 0x6F, 0x67, 0x2F, 0x50, 0x61, 0x67,
-          0x65, 0x73, 0x20, 0x32, 0x20, 0x30, 0x20, 0x52, 0x3E, 0x3E, 0x0A, 0x65,
-          0x6E, 0x64, 0x6F, 0x62, 0x6A, 0x0A, 0x32, 0x20, 0x30, 0x20, 0x6F, 0x62,
-          0x6A, 0x0A, 0x3C, 0x3C, 0x2F, 0x54, 0x79, 0x70, 0x65, 0x2F, 0x50, 0x61,
-          0x67, 0x65, 0x73, 0x2F, 0x4B, 0x69, 0x64, 0x73, 0x5B, 0x33, 0x20, 0x30,
-          0x20, 0x52, 0x5D, 0x2F, 0x43, 0x6F, 0x75, 0x6E, 0x74, 0x20, 0x31, 0x3E,
-          0x3E, 0x0A, 0x65, 0x6E, 0x64, 0x6F, 0x62, 0x6A, 0x0A, 0x33, 0x20, 0x30,
-          0x20, 0x6F, 0x62, 0x6A, 0x0A, 0x3C, 0x3C, 0x2F, 0x54, 0x79, 0x70, 0x65,
-          0x2F, 0x50, 0x61, 0x67, 0x65, 0x2F, 0x50, 0x61, 0x72, 0x65, 0x6E, 0x74,
-          0x20, 0x32, 0x20, 0x30, 0x20, 0x52, 0x2F, 0x4D, 0x65, 0x64, 0x69, 0x61,
-          0x42, 0x6F, 0x78, 0x5B, 0x30, 0x20, 0x30, 0x20, 0x33, 0x20, 0x33, 0x5D,
-          0x2F, 0x43, 0x6F, 0x6E, 0x74, 0x65, 0x6E, 0x74, 0x73, 0x20, 0x34, 0x20,
-          0x30, 0x20, 0x52, 0x3E, 0x3E, 0x0A, 0x65, 0x6E, 0x64, 0x6F, 0x62, 0x6A,
-          0x0A, 0x34, 0x20, 0x30, 0x20, 0x6F, 0x62, 0x6A, 0x0A, 0x3C, 0x3C, 0x2F,
-          0x4C, 0x65, 0x6E, 0x67, 0x74, 0x68, 0x20, 0x31, 0x30, 0x3E, 0x3E, 0x73,
-          0x74, 0x72, 0x65, 0x61, 0x6D, 0x0A, 0x42, 0x54, 0x0A, 0x2F, 0x46, 0x31,
-          0x20, 0x39, 0x20, 0x54, 0x66, 0x0A, 0x31, 0x20, 0x30, 0x20, 0x30, 0x20, 0x31,
-          0x20, 0x31, 0x20, 0x32, 0x20, 0x54, 0x6D, 0x0A, 0x28, 0x29, 0x54, 0x6A,
-          0x0A, 0x45, 0x54, 0x0A, 0x65, 0x6E, 0x64, 0x73, 0x74, 0x72, 0x65, 0x61,
-          0x6D, 0x0A, 0x65, 0x6E, 0x64, 0x6F, 0x62, 0x6A, 0x0A, 0x78, 0x72, 0x65,
-          0x66, 0x0A, 0x30, 0x20, 0x35, 0x0A, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30,
-          0x30, 0x30, 0x30, 0x30, 0x30, 0x20, 0x36, 0x35, 0x35, 0x33, 0x35, 0x20,
-          0x66, 0x0A, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x31, 0x38,
-          0x20, 0x30, 0x30, 0x30, 0x30, 0x30, 0x20, 0x6E, 0x0A, 0x30, 0x30, 0x30,
-          0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x37, 0x37, 0x20, 0x30, 0x30, 0x30,
-          0x30, 0x30, 0x30, 0x20, 0x6E, 0x0A, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30,
-          0x30, 0x31, 0x37, 0x38, 0x20, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30,
-          0x33, 0x30, 0x38, 0x20, 0x30, 0x30, 0x30, 0x30, 0x30, 0x20, 0x6E, 0x0A,
-          0x74, 0x72, 0x61, 0x69, 0x6C, 0x65, 0x72, 0x0A, 0x3C, 0x3C, 0x2F, 0x53,
-          0x69, 0x7A, 0x65, 0x20, 0x35, 0x2F, 0x52, 0x6F, 0x6F, 0x74, 0x20, 0x31,
-          0x20, 0x30, 0x20, 0x52, 0x3E, 0x3E, 0x0A, 0x73, 0x74, 0x61, 0x72, 0x74,
-          0x78, 0x72, 0x65, 0x66, 0x0A, 0x34, 0x30, 0x36, 0x0A, 0x25, 0x25, 0x45,
-          0x4F, 0x46
-        ]);
-        
-        // Try to create a simple document to test the worker
-        try {
-          const loadingTask = pdfjsLib.getDocument({
-            data: minimalPdf,
-            cMapUrl: `https://cdn.jsdelivr.net/npm/pdfjs-dist@${PDFJS_VERSION}/cmaps/`,
-            cMapPacked: true,
-            standardFontDataUrl: `https://cdn.jsdelivr.net/npm/pdfjs-dist@${PDFJS_VERSION}/standard_fonts/`
-          });
-          
-          const testDoc = await loadingTask.promise;
-          console.log("Worker test successful:", testDoc);
-          return true;
-        } catch (testError) {
-          console.error("Worker test failed:", testError);
-          setError(`PDF.js worker failed to load: ${testError.message}. Try refreshing the page.`);
-          return false;
-        }
-      } catch (error) {
-        console.error("Worker initialization failed:", error);
-        setError(`PDF.js worker initialization failed: ${error.message}. Try refreshing the page.`);
-        return false;
-      }
-    };
-    
-    checkWorker().then(result => {
-      if (!result) {
-        setIsLoading(false);
-      }
-    });
-  }, []);
-
-  // Add this before the return statement
-  // Tool options configuration
+  // Define tool options
   const toolOptions = [
     { id: 'cursor', icon: <FaArrowsAlt /> },
     { id: 'text', icon: <FaFont /> },
     { id: 'draw', icon: <FaPenNib /> },
     { id: 'shape', icon: <FaDrawPolygon /> },
-    { id: 'highlight', icon: <FaHighlighter /> },
     { id: 'image', icon: <FaImage /> },
+    { id: 'highlight', icon: <FaHighlighter /> },
     { id: 'stamp', icon: <FaStamp /> },
-    { id: 'erase', icon: <FaEraser /> }
+    { id: 'eraser', icon: <FaEraser /> },
+    { id: 'comment', icon: <FaRegComment /> },
+    { id: 'signature', icon: <FaSignature /> }
   ];
 
-  // Update handleCanvasClick to properly handle text insertion
-  const handleCanvasClick = (e) => {
-    // Skip if in shape drawing mode
-    if (isDrawingShape) return;
-    
-    // Handle adding text on click when in text mode
-    if (activeToolMode === 'text' && fabricCanvas.current) {
-      // Get click coordinates relative to canvas
-      const canvas = fabricCanvas.current.upperCanvasEl;
-      const rect = canvas.getBoundingClientRect();
-      
-      // Calculate position, accounting for scroll
-      const x = e.clientX - rect.left + canvas.parentElement.scrollLeft;
-      const y = e.clientY - rect.top + canvas.parentElement.scrollTop;
-      
-      // Add text at click position
-      console.log("Adding text at", x, y);
-      addTextBox(x, y);
+  // Handle shape button click - this is the handler for the shape buttons in the toolbar
+  const handleShapeButtonClick = (shapeType) => {
+    // First switch to shape tool if not already in shape mode
+    if (activeToolMode !== 'shape') {
+      handleToolSelect('shape');
     }
+    
+    // Wait a short time to ensure the tool selection has taken effect
+    setTimeout(() => {
+      if (fabricCanvas.current) {
+        try {
+          // Call the addShape function to start drawing the selected shape
+          addShape(shapeType);
+        } catch (error) {
+          console.error(`Error starting shape drawing for ${shapeType}:`, error);
+          
+          // Show error to user
+          setError(`Could not start drawing shape: ${error.message}`);
+        }
+      } else {
+        console.error("Fabric canvas not initialized - cannot add shape");
+        setError("Canvas not ready. Please try again after the PDF loads completely.");
+      }
+    }, 50);
   };
 
-  // Toggle sidebar visibility
-  const toggleSidebar = () => {
-    setSidebarVisible(prev => !prev);
-  };
+  // Add a document-level click handler as a last resort for text editing
+  useEffect(() => {
+    if (activeToolMode !== 'text' || !fabricCanvas.current) {
+      return;
+    }
 
-  // Add zoom control functions
-  const zoomIn = () => {
-    setScale(prev => {
-      const newScale = Math.min(5, prev + 0.25); // Cap at 5x zoom
-      return newScale;
-    });
-  };
-  
-  const zoomOut = () => {
-    setScale(prev => {
-      const newScale = Math.max(0.5, prev - 0.25); // Minimum 0.5x zoom
-      return newScale;
-    });
-  };
-  
-  // Optimize the fitToWidth function to make it faster and more reliable
-  const fitToWidth = () => {
-    try {
-      if (!containerRef.current || pdfPageImages.length === 0) {
-        console.log("Cannot fit to width: container or page images not available");
+    console.log("Adding document-level click handler for text tool");
+    
+    const handleDocumentClick = (e) => {
+      // Skip if the click is inside a fabric canvas element
+      if (e.target && (
+        e.target.tagName === 'CANVAS' || 
+        (e.target.className && 
+         typeof e.target.className === 'string' && 
+         e.target.className.includes('fabric'))
+      )) {
         return;
       }
       
-      setIsLoading(true);
+      // Skip if the click is in the toolbar or sidebar
+      if (e.target.closest('.toolbar') || e.target.closest('.sidebar')) {
+        return;
+      }
       
-      // Use setTimeout to allow the loading indicator to appear
-      setTimeout(() => {
+      // Get the canvas position
+      const canvasElement = fabricCanvas.current.upperCanvasEl;
+      const rect = canvasElement.getBoundingClientRect();
+      
+      // Check if click is inside the canvas area
+      if (e.clientX >= rect.left && e.clientX <= rect.right &&
+          e.clientY >= rect.top && e.clientY <= rect.bottom) {
+        
+        console.log("Document click in canvas area - creating text");
+        
+        // Calculate position relative to canvas
+        const x = e.clientX - rect.left;
+        const y = e.clientY - rect.top;
+        
         try {
-          // Get available container width with minimal padding
-          const containerWidth = containerRef.current.clientWidth - 20; // 10px padding on each side
-          const pageIndex = currentPage - 1;
+          // Create text with default text
+          const newText = new fabric.IText('Type something', {
+            left: x,
+            top: y,
+            fontFamily: textOptions.font || 'Helvetica',
+            fontSize: textOptions.size || 18,
+            fill: textOptions.color || '#000000',
+            backgroundColor: textOptions.backgroundColor,
+            fontWeight: textOptions.fontWeight || 'normal',
+            fontStyle: textOptions.fontStyle || 'normal',
+            editingBorderColor: '#00AEFF',
+            cursorWidth: 2,
+            cursorColor: '#000000',
+            cursorDuration: 600,
+            padding: 5,
+            cornerSize: 8,
+            transparentCorners: false,
+            centeredScaling: true,
+            editable: true,
+            selectable: true,
+            hasControls: true,
+            hasBorders: true,
+            id: `text-${Date.now()}`
+          });
           
-          if (pageIndex < 0 || pageIndex >= pdfPageImages.length) {
-            console.error("Invalid page index for fit to width");
-            setIsLoading(false);
-            return;
-          }
+          // Add to canvas
+          fabricCanvas.current.add(newText);
+          fabricCanvas.current.setActiveObject(newText);
           
-          const pageInfo = pdfPageImages[pageIndex];
+          // Enhance it
+          enhanceTextObject(newText);
           
-          // Get the original width of the PDF page
-          const pageWidth = pageInfo.originalWidth;
+          // Enter edit mode
+          newText.enterEditing();
+          fabricCanvas.current.renderAll();
           
-          if (!pageWidth) {
-            console.error("Cannot determine page width for fit to width");
-            setIsLoading(false);
-            return;
-          }
+          // Focus text area
+          findAndFocusTextareaElement(newText, fabricCanvas.current);
           
-          // Calculate the exact scale needed to fit the PDF to the container width
-          // This is a direct 1:1 calculation with no additional scaling factors
-          const exactScale = containerWidth / pageWidth;
+          // Add to undo stack and layer
+          addToUndoStack();
+          addObjectToActiveLayer(newText.id);
           
-          // Log the scale we're applying for debugging
-          console.log(`Fit to width: container=${containerWidth}px, page=${pageWidth}px, scale=${exactScale}`);
-          
-          // Apply the new scale
-          setScale(exactScale);
-          
-          // Ensure we scroll to the top after scaling
-          if (containerRef.current) {
-            setTimeout(() => {
-              containerRef.current.scrollTop = 0;
-            }, 50);
-          }
-          
-          setIsLoading(false);
+          // Prevent default to avoid double handling
+          e.preventDefault();
         } catch (error) {
-          console.error("Error in fitToWidth:", error);
-          setIsLoading(false);
+          console.error("Error creating text from document click:", error);
         }
-      }, 10);
-    } catch (error) {
-      console.error("Error in fitToWidth:", error);
-      setIsLoading(false);
-    }
-  };
+      }
+    };
+    
+    // Add listener with capture phase to get it early
+    document.addEventListener('click', handleDocumentClick, true);
+    
+    // Cleanup
+    return () => {
+      document.removeEventListener('click', handleDocumentClick, true);
+    };
+  }, [activeToolMode, fabricCanvas.current, textOptions]);
+
+  // Detect clicks on canvas objects for text editing
+  useEffect(() => {
+    if (!fabricCanvas.current) return;
+    
+    const handleObjectSelected = (e) => {
+      try {
+        if (!e.selected || !e.selected[0]) return;
+        
+        const selectedObj = e.selected[0];
+        
+        // Only handle text objects
+        if (selectedObj.type === 'i-text' || selectedObj.type === 'textbox') {
+          console.log("Text object selected:", selectedObj.id);
+          
+          // Update text options to match the selected object
+          setTextOptions({
+            font: selectedObj.fontFamily || 'Helvetica',
+            size: selectedObj.fontSize || 16,
+            color: selectedObj.fill || '#000000',
+            backgroundColor: selectedObj.backgroundColor || 'transparent',
+            fontWeight: selectedObj.fontWeight || 'normal',
+            fontStyle: selectedObj.fontStyle || 'normal'
+          });
+          
+          // If we're in text mode, show the editor
+          if (activeToolMode === 'text') {
+            showTextEditor(selectedObj);
+          }
+        }
+      } catch (error) {
+        console.error("Error handling object selection:", error);
+      }
+    };
+    
+    // Add the object selection listener
+    fabricCanvas.current.on('selection:created', handleObjectSelected);
+    fabricCanvas.current.on('selection:updated', handleObjectSelected);
+    
+    // Cleanup
+    return () => {
+      if (fabricCanvas.current) {
+        fabricCanvas.current.off('selection:created', handleObjectSelected);
+        fabricCanvas.current.off('selection:updated', handleObjectSelected);
+      }
+    };
+  }, [activeToolMode, fabricCanvas.current]);
 
   // Wrap the return JSX with the ErrorBoundary
   return (
@@ -2129,18 +3436,18 @@ const PDFEditor = () => {
             {/* Page navigation */}
             <div className={styles.toolGroup}>
               <button
-                onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
-                disabled={currentPage <= 1}
+                onClick={() => handlePageChange(currentPage - 1)}
+                disabled={currentPage <= 1 || isLoading}
                 className={styles.button}
               >
                 Previous
               </button>
-              <span className="text-white">
+              <span className={styles.pageInfo}>
                 Page {currentPage} of {pageCount}
               </span>
               <button
-                onClick={() => setCurrentPage(prev => Math.min(pageCount, prev + 1))}
-                disabled={currentPage >= pageCount}
+                onClick={() => handlePageChange(currentPage + 1)}
+                disabled={currentPage >= pageCount || isLoading}
                 className={styles.button}
               >
                 Next
@@ -2415,7 +3722,16 @@ const PDFEditor = () => {
                       <input
                         type="color"
                         value={drawingOptions.color}
-                        onChange={(e) => setDrawingOptions({...drawingOptions, color: e.target.value})}
+                        onChange={(e) => {
+                          const newColor = e.target.value;
+                          setDrawingOptions({...drawingOptions, color: newColor});
+                          // Update selected object if exists
+                          if (selectedObject && fabricCanvas.current) {
+                            selectedObject.set('stroke', newColor);
+                            fabricCanvas.current.renderAll();
+                            addToUndoStack();
+                          }
+                        }}
                         className={styles.colorInput}
                       />
                     </label>
@@ -2431,26 +3747,40 @@ const PDFEditor = () => {
                             checked={drawingOptions.fillEnabled}
                             onChange={(e) => {
                               const isEnabled = e.target.checked;
+                              const newFill = isEnabled ? drawingOptions.fill : 'transparent';
                               setDrawingOptions({
                                 ...drawingOptions,
                                 fillEnabled: isEnabled,
-                                fill: isEnabled ? drawingOptions.fill : 'transparent'
+                                fill: newFill
                               });
+                              // Update selected object if exists
+                              if (selectedObject && fabricCanvas.current) {
+                                selectedObject.set('fill', newFill);
+                                fabricCanvas.current.renderAll();
+                                addToUndoStack();
+                              }
                             }}
                           />
                           <span className={styles.slider}></span>
                         </label>
                       </div>
-                      <input
-                        type="color"
-                        value={drawingOptions.fill === 'transparent' ? '#ffffff' : drawingOptions.fill}
-                        onChange={(e) => setDrawingOptions({
-                          ...drawingOptions,
-                          fill: drawingOptions.fillEnabled ? e.target.value : 'transparent'
-                        })}
-                        disabled={!drawingOptions.fillEnabled}
-                        className={styles.colorInput}
-                      />
+                      {drawingOptions.fillEnabled && (
+                        <input
+                          type="color"
+                          value={drawingOptions.fill === 'transparent' ? '#000000' : drawingOptions.fill}
+                          onChange={(e) => {
+                            const newFill = e.target.value;
+                            setDrawingOptions({...drawingOptions, fill: newFill});
+                            // Update selected object if exists
+                            if (selectedObject && fabricCanvas.current) {
+                              selectedObject.set('fill', newFill);
+                              fabricCanvas.current.renderAll();
+                              addToUndoStack();
+                            }
+                          }}
+                          className={styles.colorInput}
+                        />
+                      )}
                     </label>
                   </div>
                   
@@ -2489,7 +3819,7 @@ const PDFEditor = () => {
                 {/* Shape selection icons */}
                 <div className={styles.shapeGrid}>
                   <button 
-                    onClick={() => addShape('rect')} 
+                    onClick={() => handleShapeButtonClick('rect')} 
                     className={`${styles.shapeButton} ${currentShapeType === 'rect' && isDrawingShape ? styles.activeShape : ''}`}
                     title="Rectangle"
                     disabled={isDrawingShape}
@@ -2497,7 +3827,7 @@ const PDFEditor = () => {
                     <FaRegSquare />
                   </button>
                   <button 
-                    onClick={() => addShape('square')} 
+                    onClick={() => handleShapeButtonClick('square')} 
                     className={`${styles.shapeButton} ${currentShapeType === 'square' && isDrawingShape ? styles.activeShape : ''}`}
                     title="Square"
                     disabled={isDrawingShape}
@@ -2505,7 +3835,7 @@ const PDFEditor = () => {
                     <FaSquare />
                   </button>
                   <button 
-                    onClick={() => addShape('circle')} 
+                    onClick={() => handleShapeButtonClick('circle')} 
                     className={`${styles.shapeButton} ${currentShapeType === 'circle' && isDrawingShape ? styles.activeShape : ''}`}
                     title="Circle"
                     disabled={isDrawingShape}
@@ -2513,7 +3843,7 @@ const PDFEditor = () => {
                     <FaRegCircle />
                   </button>
                   <button 
-                    onClick={() => addShape('ellipse')} 
+                    onClick={() => handleShapeButtonClick('ellipse')} 
                     className={`${styles.shapeButton} ${currentShapeType === 'ellipse' && isDrawingShape ? styles.activeShape : ''}`}
                     title="Ellipse"
                     disabled={isDrawingShape}
@@ -2521,7 +3851,7 @@ const PDFEditor = () => {
                     <FaCircle />
                   </button>
                   <button 
-                    onClick={() => addShape('triangle')} 
+                    onClick={() => handleShapeButtonClick('triangle')} 
                     className={`${styles.shapeButton} ${currentShapeType === 'triangle' && isDrawingShape ? styles.activeShape : ''}`}
                     title="Triangle"
                     disabled={isDrawingShape}
@@ -2529,7 +3859,7 @@ const PDFEditor = () => {
                     <div className={styles.triangleIcon}></div>
                   </button>
                   <button 
-                    onClick={() => addShape('arrow')} 
+                    onClick={() => handleShapeButtonClick('arrow')} 
                     className={`${styles.shapeButton} ${currentShapeType === 'arrow' && isDrawingShape ? styles.activeShape : ''}`}
                     title="Arrow"
                     disabled={isDrawingShape}
@@ -2537,7 +3867,7 @@ const PDFEditor = () => {
                     <FaLongArrowAltRight />
                   </button>
                   <button 
-                    onClick={() => addShape('line')} 
+                    onClick={() => handleShapeButtonClick('line')} 
                     className={`${styles.shapeButton} ${currentShapeType === 'line' && isDrawingShape ? styles.activeShape : ''}`}
                     title="Line"
                     disabled={isDrawingShape}
@@ -2545,7 +3875,7 @@ const PDFEditor = () => {
                     <div className={styles.lineIcon}></div>
                   </button>
                   <button 
-                    onClick={() => addShape('star')} 
+                    onClick={() => handleShapeButtonClick('star')} 
                     className={`${styles.shapeButton} ${currentShapeType === 'star' && isDrawingShape ? styles.activeShape : ''}`}
                     title="Star"
                     disabled={isDrawingShape}
@@ -2553,7 +3883,7 @@ const PDFEditor = () => {
                     <FaRegStar />
                   </button>
                   <button 
-                    onClick={() => addShape('heart')} 
+                    onClick={() => handleShapeButtonClick('heart')} 
                     className={`${styles.shapeButton} ${currentShapeType === 'heart' && isDrawingShape ? styles.activeShape : ''}`}
                     title="Heart"
                     disabled={isDrawingShape}
@@ -2717,7 +4047,41 @@ const PDFEditor = () => {
             {pdfDoc && (
               <div 
                 className={styles.canvasWrapper}
-                onClick={handleCanvasClick}
+                ref={canvasWrapperRef}
+                onClick={(e) => {
+                  // Don't handle clicks if fabric is in drawing mode
+                  if (fabricCanvas.current && fabricCanvas.current.isDrawingMode) {
+                    return;
+                  }
+                  
+                  // Only handle clicks directly on the canvas wrapper
+                  // or explicit clicks for the text tool
+                  if ((e.target.tagName.toLowerCase() === 'div' || activeToolMode === 'text') && 
+                      fabricCanvas.current) {
+                    // Get the canvas element
+                    const canvasEl = fabricCanvas.current.upperCanvasEl;
+                    if (!canvasEl) return;
+                    
+                    // Get canvas position
+                    const rect = canvasEl.getBoundingClientRect();
+                    
+                    // Calculate position relative to canvas
+                    const x = e.clientX - rect.left;
+                    const y = e.clientY - rect.top;
+                    
+                    console.log(`Canvas clicked at (${x}, ${y}), tool: ${activeToolMode}`);
+                    
+                    // Create a synthetic event similar to what fabric provides
+                    const fabricEvent = {
+                      e: e,
+                      target: null,
+                      pointer: { x, y }
+                    };
+                    
+                    // Call the canvas click handler with this event
+                    handleCanvasClick(fabricEvent);
+                  }
+                }}
               >
                 {/* PDF Rendering Canvas */}
                 <canvas 
